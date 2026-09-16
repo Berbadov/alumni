@@ -1,0 +1,13 @@
+%% Sequence: read alumni list
+sequenceDiagram
+    participant U as Browser
+    participant F as frontend (Vite)
+    participant A as alumni-api
+    participant M as MongoDB
+
+    U->>F: load page
+    F->>A: GET /api/v1/alumni
+    A->>M: collection.find({})
+    M-->>A: cursor of docs
+    A-->>F: 200 JSON [Alumni]
+    F-->>U: rendered list

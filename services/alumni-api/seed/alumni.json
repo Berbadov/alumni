@@ -1,0 +1,23 @@
+[
+  {
+    "_id": "a1",
+    "full_name": "Beraat Yildirim",
+    "graduation_year": 2027,
+    "email": "beraat@example.edu",
+    "degree": "Web Development"
+  },
+  {
+    "_id": "a2",
+    "full_name": "Ada Lovelace",
+    "graduation_year": 2027,
+    "email": "ada@example.edu",
+    "degree": "Web Development"
+  },
+  {
+    "_id": "a3",
+    "full_name": "Grace Hopper",
+    "graduation_year": 2027,
+    "email": "grace@example.edu",
+    "degree": "Web Development"
+  }
+]

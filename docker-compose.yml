@@ -1,0 +1,46 @@
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-seed:
+    image: mongo:7
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./services/alumni-api/seed:/seed
+    command: >
+      mongoimport --host mongo --db alumni --collection alumni
+      --drop --jsonArray --file /seed/alumni.json
+
+  alumni-api:
+    build: ./services/alumni-api
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: alumni
+      BIND_ADDR: 0.0.0.0:8080
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - alumni-api
+
+volumes:
+  mongo-data:
