@@ -8,6 +8,7 @@ and record the rationale in `trade-offs.md` if the choice is non-obvious.
 - [ ] **Schema hardening** — required vs optional fields, email format, unique email index.
 
 ## Later
+- [ ] **About page content** — replace the Prufrock placeholder with real project/team info.
 - [ ] **Search / filter** — query by graduation year, degree, name; pagination + sorting.
 - [ ] **Alumni profiles** — individual detail page + `GET /api/v1/alumni/{id}`.
 - [ ] **Auth & sessions** — class admin login; restrict write endpoints.
