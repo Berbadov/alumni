@@ -2,16 +2,28 @@
 
 Completed work log, newest first.
 
+## 2026-09-23 — `/about` page with Prufrock poem
+- `frontend`: new `src/pages/About.tsx` — T.S. Eliot's "The Love Song of J. Alfred Prufrock"
+  (1915, public domain) excerpts in a shadcn `Card` (`CardTitle`/`CardDescription`/`CardContent`),
+  poem stanzas in `font-serif italic` on the theme's `card-foreground` token, with
+  `whitespace-pre-line` to keep the line breaks.
+- Routing: `about` route in `App.tsx`, "About" `NavLink` in `Layout.tsx` header (active state
+  styled like Home/Alumni). Works at `/about` and `/about/` (router treats the trailing slash
+  as optional).
+- Verified: `npm run build` (tsc + vite) passes; `docker compose up --build frontend` —
+  `/about` → `200 text/html`, and the served bundle (hash `index-Dh8X5DxM.js`, same as the
+  host build) contains the poem text. Diagrams unchanged — they don't enumerate SPA routes.
+
 ## 2026-09-23 — `GET /api/v1/sum/{num1}/{num2}` bare JSON sum
-- `alumni-api`: `handlers::sum` takes `web::Path<(i64, i64)>` and returns
-  `web::Json(num1.saturating_add(num2))` — bare JSON integer, no wrapper; saturating so an
-  overflow cannot panic in the handler path.
+- `alumni-api`: `handlers::sum` takes `web::Path<(f64, f64)>` and returns `web::Json(num1 + num2)`
+  — bare JSON number, no wrapper. Floats after an i64 first cut (sums like `1.5 + 2` were 404s);
+  plain `+` since f64 overflow is `inf`, not a panic.
 - Gateway: `frontend/nginx.conf` adds prefix `location /sum/` proxying to `/api/v1/sum/`,
   same pattern as `/hello/`.
-- Verified in Docker: `5 [200 application/json]` from `127.0.0.1/sum/2/3`,
-  `127.0.0.1/api/v1/sum/2/3`, and `127.0.0.1:8080/api/v1/sum/2/3`; negatives work
-  (`/sum/-5/3` → `-2`); overflow saturates (`i64::MIN + -1` → `i64::MIN`); non-numeric
-  input (`/sum/2/abc`) and missing segments (`/sum/2`) → 404 (actix `Path` parse errors).
+- Verified in Docker: `5.0 [200 application/json]` from `127.0.0.1/sum/2/3`,
+  `127.0.0.1/api/v1/sum/2/3`, and `127.0.0.1:8080/api/v1/sum/2/3`; decimals work
+  (`/sum/1.5/2` → `3.5`); negatives (`/sum/-5/3` → `-2.0`); non-numeric input (`/sum/2/abc`)
+  and missing segments (`/sum/2`) → 404 (actix `Path` parse errors).
 
 ## 2026-09-23 — `GET /api/v1/hello/{variable}` parameterized greeting
 - `alumni-api`: `handlers::hello_name` takes `web::Path<String>` and returns
