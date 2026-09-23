@@ -18,9 +18,9 @@ pub async fn hello_name(path: web::Path<String>) -> Json<String> {
 }
 
 #[get("/sum/{num1}/{num2}")]
-pub async fn sum(path: web::Path<(i64, i64)>) -> Json<i64> {
+pub async fn sum(path: web::Path<(f64, f64)>) -> Json<f64> {
     let (num1, num2) = path.into_inner();
-    Json(num1.saturating_add(num2))
+    Json(num1 + num2)
 }
 
 #[get("/alumni")]
