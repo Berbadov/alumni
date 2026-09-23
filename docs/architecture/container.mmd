@@ -1,15 +1,15 @@
 %% Docker compose containers, ports and volumes
 flowchart TB
     subgraph Host["Host (docker compose)"]
-        FE["frontend\nReact+Vite\nTailwind+shadcn/ui\n:5173"]
+        FE["frontend\nnginx + static SPA\nReact+Tailwind+shadcn/ui\n:80"]
         API["alumni-api\nactix-web\n:8080"]
         Seed["mongo-seed\n(one-shot)"]
         DB["mongo:7\n:27017"]
         Vol[("mongo-data volume")]
     end
 
-    Browser["Browser :5173"] --> FE
-    FE -->|/api/v1 over compose network| API
+    Browser["Browser :80"] --> FE
+    FE -->|"/api/v1 proxied to :8080"| API
     API -->|27017| DB
     Seed -->|mongoimport| DB
     DB --- Vol

@@ -14,4 +14,3 @@ and record the rationale in `trade-offs.md` if the choice is non-obvious.
 - [ ] **Events** — alumni events model + endpoints.
 - [ ] **Notifications service** — split out as `services/notifications/` microservice (email/reminders).
 - [ ] **CI pipeline** — lint, clippy pedantic, build, docker compose smoke test.
-- [ ] **Production frontend serving** — build static assets, serve via alumni-api or a separate static container.

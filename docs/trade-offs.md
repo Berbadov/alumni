@@ -2,6 +2,39 @@
 
 Decisions and compromises, with rationale.
 
+## Bare smoke-test routes at the gateway (`/hello`, `/sum`) vs `/api/v1` only
+`GET /hello` on port 80 is a requested convenience: a one-URL smoke check without the API
+prefix. It deviates from the "REST under `/api/v1`" rule, so the deviation lives at the edge —
+nginx's exact-match `location = /hello` rewrites to the API's canonical `/api/v1/hello`, and the
+API itself keeps everything scoped. Exact match (not a prefix location) so it cannot shadow
+future SPA routes like `/hello-world`. The parameterized routes (`/hello/{variable}`,
+`/sum/{num1}/{num2}`) get bare-gateway twins via prefix locations with a trailing slash
+(`/hello/`, `/sum/`) — the trailing slash keeps `/hello-world`-style SPA routes out of their
+reach, so only SPA paths literally under those prefixes (none today) would be shadowed.
+
+## alumni-api build: rust 1.98 image + committed Cargo.lock vs rust-version 1.85
+The API's first real Docker build failed on both toolchain and code (see `done.md`): a fresh
+dependency resolve pulls `yoke-derive 0.8.3`, which does not compile on rustc 1.85, and the app
+code targeted the mongodb 2.x API. Bumped the build image to `rust:1.98` and committed
+`Cargo.lock` so image builds are reproducible instead of re-resolving on every build.
+Caveat: `Cargo.toml` keeps `rust-version = "1.85"` per the rust-skills guide, but the locked
+dependency tree now effectively requires the newer toolchain — a host rustc pinned to 1.85
+will not build the service. Revisit the declared MSRV when the guide's floor moves.
+
+## Frontend serving: nginx inside the frontend image vs separate proxy service
+Chose nginx in the frontend image (multi-stage build: node compiles `dist/`, nginx serves it).
+A separate proxy container would decouple routing config from the app image and allow
+proxying future microservices without rebuilding the frontend, but for one backend it adds
+a container and a config surface for no gain. The `/api/` proxy rule lives in
+`frontend/nginx.conf` and can move out if services multiply.
+
+## Dropping the Vite dev server from compose
+Compose now runs the production build on :80 instead of `vite dev` on :5173. The dev
+container gave hot reload in Docker, but it served unminified dev assets as "the deployment"
+and masked build breakage — `npm run dev` on the host (with the Vite `/api` proxy) covers
+iteration, and compose now exercises the artifact that actually ships. Cost: no in-Docker
+hot reload; API is still reachable directly on :8080 for host-side dev.
+
 ## UI kit: shadcn/ui vs ObsidianUI vs hand-rolled CSS
 Chose shadcn/ui. ObsidianUI (evaluated 2026-09-23) is an effects library — cursor trails,
 WebGL backgrounds, text animations — with no forms, tables, or dialogs, so it cannot carry

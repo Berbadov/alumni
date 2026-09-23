@@ -1,33 +1,17 @@
-import { useEffect, useState } from 'react'
-import { fetchAlumni } from './api'
-import { AlumniList } from './AlumniList'
-import type { Alumni } from './types'
-import { Card, CardContent } from '@/components/ui/card'
+import { Route, Routes } from 'react-router-dom'
+import { Layout } from '@/components/Layout'
+import { Home } from '@/pages/Home'
+import { Alumni } from '@/pages/Alumni'
+import { NotFound } from '@/pages/NotFound'
 
 export function App() {
-  const [alumni, setAlumni] = useState<Alumni[]>([])
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetchAlumni().then(setAlumni).catch((e: unknown) => setError(String(e)))
-  }, [])
-
   return (
-    <main className="mx-auto max-w-3xl space-y-4 p-4">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        Alumni &mdash; Web Development, Fall 2026&ndash;2027
-      </h1>
-      {error ? (
-        <p role="alert" className="text-destructive">
-          Error: {error}
-        </p>
-      ) : (
-        <Card>
-          <CardContent>
-            <AlumniList alumni={alumni} />
-          </CardContent>
-        </Card>
-      )}
-    </main>
+    <Routes>
+      <Route element={<Layout />}>
+        <Route index element={<Home />} />
+        <Route path="alumni" element={<Alumni />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   )
 }
