@@ -2,6 +2,14 @@
 
 Decisions and compromises, with rationale.
 
+## UI kit: shadcn/ui vs ObsidianUI vs hand-rolled CSS
+Chose shadcn/ui. ObsidianUI (evaluated 2026-09-23) is an effects library — cursor trails,
+WebGL backgrounds, text animations — with no forms, tables, or dialogs, so it cannot carry
+a CRUD-heavy tracking app. shadcn/ui ships app components, copies MIT source into the repo
+(no runtime dependency lock-in), and adds components on demand via the shadcn CLI. Costs:
+Tailwind in the build chain and a larger bundle (~58 kB gz JS vs a plain HTML list).
+ObsidianUI remains an option later for landing-page flourishes via the same CLI.
+
 ## Frontend: React + Vite vs htmx
 Chose React + Vite. Larger bundle and a client-side stack, but it is the most common
 agent-friendly setup: typed TS, large ecosystem, clear component model. htmx would be

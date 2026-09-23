@@ -1,7 +1,7 @@
 %% Docker compose containers, ports and volumes
 flowchart TB
     subgraph Host["Host (docker compose)"]
-        FE["frontend\nReact+Vite\n:5173"]
+        FE["frontend\nReact+Vite\nTailwind+shadcn/ui\n:5173"]
         API["alumni-api\nactix-web\n:8080"]
         Seed["mongo-seed\n(one-shot)"]
         DB["mongo:7\n:27017"]

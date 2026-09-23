@@ -4,7 +4,7 @@ Planned work, prioritized top to bottom. Move items to `done.md` when complete
 and record the rationale in `trade-offs.md` if the choice is non-obvious.
 
 ## Next
-- [ ] **Alumni CRUD** — `POST`, `PUT`, `DELETE` for `/api/v1/alumni`; input validation.
+- [ ] **Alumni CRUD** — `POST`, `PUT`, `DELETE` for `/api/v1/alumni`; input validation; frontend form via shadcn `Button`/`Input`.
 - [ ] **Schema hardening** — required vs optional fields, email format, unique email index.
 
 ## Later
