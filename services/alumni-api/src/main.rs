@@ -5,8 +5,6 @@ mod error;
 mod handlers;
 mod models;
 
-use std::time::Duration;
-
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use mongodb::options::ClientOptions;
 use mongodb::Client;
@@ -33,11 +31,18 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(state.clone())
             .wrap(Logger::default())
-            .service(web::scope("/api/v1").service(handlers::list_alumni))
+            .service(
+                web::scope("/api/v1")
+                    .service(handlers::list_alumni)
+                    .service(handlers::hello)
+                    .service(handlers::hello_name)
+                    .service(handlers::sum),
+            )
     })
     .bind(&cfg.bind_addr)?
     .workers(2)
-    .shutdown_timeout(Duration::from_secs(5));
+    .shutdown_timeout(5)
+    .run();
 
     let handle = server.handle();
     tokio::spawn(async move {
@@ -46,5 +51,5 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
-    server.run().await
+    server.await
 }

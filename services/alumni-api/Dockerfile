@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM rust:1.85 AS build
+FROM rust:1.98 AS build
 WORKDIR /app
 # Build dependencies first for better layer caching.
 COPY Cargo.toml ./
