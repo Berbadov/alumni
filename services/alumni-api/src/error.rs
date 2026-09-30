@@ -7,13 +7,18 @@ pub enum ApiError {
     Mongo(#[from] mongodb::error::Error),
     #[error("not found")]
     NotFound,
+    #[error("{0}")]
+    BadRequest(String),
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 impl ResponseError for ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
-            ApiError::Mongo(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::Mongo(_) | ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ApiError::NotFound => StatusCode::NOT_FOUND,
+            ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
         }
     }
 

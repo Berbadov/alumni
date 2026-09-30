@@ -2,6 +2,28 @@
 
 Completed work log, newest first.
 
+## 2026-09-30 — `/api/health`, in-memory user CRUD, Swagger UI
+- `alumni-api`: `GET /api/health` returns `{"status":"ok"}`.
+- `alumni-api`: user CRUD in `src/users.rs` with a `UserStore` (`AtomicU64` ids +
+  `Mutex<BTreeMap<u64, User>>`) — no database, data resets on restart:
+  - `POST /api/users` → 201 (name trimmed, email lowercased), `GET /api/users`,
+    `GET /api/users/{id}`, `PUT /api/users/{id}` (full replace), `PATCH /api/users/{id}`
+    (partial), `DELETE /api/users/{id}` → 204.
+  - Validation: non-empty name, email with non-empty local part and domain → 400 on failure.
+- Swagger: `utoipa` 5 + `utoipa-swagger-ui` 9; OpenAPI at `/api/openapi.json`,
+  UI at `/api/swagger/` (`GET /api/swagger` 302-redirects to it). Paths use `/api/...`
+  per request, not `/api/v1` (see `trade-offs.md`).
+- `error.rs`: new `BadRequest(String)` (400) and `Internal(String)` (500) `ApiError` variants.
+- `Dockerfile` now copies `Cargo.lock` into the dependency layer (lock was committed for
+  reproducible builds but never copied).
+- Tests: 3 actix-web integration tests in `src/users.rs` (lifecycle, ordered list,
+  invalid input) — `cargo test` passes; clippy clean (2 pre-existing `io_other_error`
+  warnings in `main.rs` unchanged).
+- Verified in Docker (`docker compose up --build`): health 200, POST 201, PATCH/PUT 200,
+  DELETE 204 then 404, bad email 400, Swagger UI 200, old `/api/v1` routes unaffected;
+  all also reachable through the nginx gateway on :80 (`/api/users`, `/api/swagger/`).
+- Tooling: Postman 12.30.3 installed on the host via winget.
+
 ## 2026-09-23 — `/about` page with Prufrock poem
 - `frontend`: new `src/pages/About.tsx` — T.S. Eliot's "The Love Song of J. Alfred Prufrock"
   (1915, public domain) excerpts in a shadcn `Card` (`CardTitle`/`CardDescription`/`CardContent`),

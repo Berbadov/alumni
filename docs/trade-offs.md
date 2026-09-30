@@ -2,6 +2,31 @@
 
 Decisions and compromises, with rationale.
 
+## User store: in-memory vs database
+`/api/users` CRUD keeps users in a `Mutex<BTreeMap>` inside the API process — a direct
+request to not use a database yet. Zero infra cost and trivially testable, but data dies
+with the container and ids restart at 1. Persistence is the top backlog item; the handler
+surface is meant to survive the swap.
+
+## User routes under `/api` instead of `/api/v1`
+`/api/users`, `/api/health`, and `/api/swagger` were requested without the version prefix,
+which deviates from the "REST under `/api/v1`" rule. Unlike the gateway `/hello` convenience
+(which rewrites to the canonical path), these have no `/api/v1` twin yet. If the project
+formalizes on `/api/v1`, these routes should move or gain twins, and the nginx `/api/`
+proxy needs no change either way.
+
+## Swagger UI: utoipa + utoipa-swagger-ui at `/api/swagger/`
+OpenAPI docs generated from `#[utoipa::path]` annotations via `utoipa` 5 + `utoipa-swagger-ui` 9 —
+the mainstream Rust choice, served as static assets inside the API (no extra container).
+Costs: annotations are duplicated knowledge next to the actix macros, and the UI's canonical
+URL is `/api/swagger/` (with slash) — a small handler 302-redirects `/api/swagger` there
+so the requested URL works. The OpenAPI document itself is at `/api/openapi.json`.
+
+## PUT semantics for `/api/users/{id}`: replace + 404, not upsert
+`PUT` requires the id to already exist (404 otherwise) instead of upserting. Upserting from
+a client-supplied id is a footgun here since ids are server-generated; a create-via-PUT
+path would also make `POST` redundant. `PATCH` covers partial updates.
+
 ## Bare smoke-test routes at the gateway (`/hello`, `/sum`) vs `/api/v1` only
 `GET /hello` on port 80 is a requested convenience: a one-URL smoke check without the API
 prefix. It deviates from the "REST under `/api/v1`" rule, so the deviation lives at the edge —

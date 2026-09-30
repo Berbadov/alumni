@@ -1,10 +1,38 @@
-use actix_web::{get, web, web::Json};
+use actix_web::{get, web, web::Json, HttpResponse};
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
+use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::models::Alumni;
 use crate::AppState;
+
+#[derive(Serialize, ToSchema)]
+pub struct Health {
+    pub status: String,
+}
+
+/// Liveness check used for smoke tests.
+#[utoipa::path(
+    get,
+    path = "/api/health",
+    responses((status = 200, description = "Service is up", body = Health)),
+)]
+#[get("/api/health")]
+pub async fn health() -> Json<Health> {
+    Json(Health {
+        status: "ok".to_owned(),
+    })
+}
+
+/// Redirects to the Swagger UI index (its mount has a trailing slash).
+#[get("/api/swagger")]
+pub async fn swagger_redirect() -> HttpResponse {
+    HttpResponse::Found()
+        .insert_header((actix_web::http::header::LOCATION, "/api/swagger/"))
+        .finish()
+}
 
 #[get("/hello")]
 pub async fn hello() -> Json<&'static str> {

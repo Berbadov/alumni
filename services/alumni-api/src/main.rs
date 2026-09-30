@@ -4,10 +4,29 @@ mod config;
 mod error;
 mod handlers;
 mod models;
+mod users;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use mongodb::options::ClientOptions;
 use mongodb::Client;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "alumni-api", version = "0.1.0"),
+    paths(
+        handlers::health,
+        users::create_user,
+        users::list_users,
+        users::get_user,
+        users::replace_user,
+        users::update_user,
+        users::delete_user,
+    ),
+    components(schemas(models::User, models::CreateUser, models::UpdateUser, handlers::Health))
+)]
+struct ApiDoc;
 
 pub struct AppState {
     pub collection: mongodb::Collection<models::Alumni>,
@@ -26,11 +45,25 @@ async fn main() -> std::io::Result<()> {
     let collection = client.database(&cfg.mongo_db).collection("alumni");
 
     let state = web::Data::new(AppState { collection });
+    let user_store = web::Data::new(users::UserStore::default());
 
     let server = HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
+            .app_data(user_store.clone())
             .wrap(Logger::default())
+            .service(
+                SwaggerUi::new("/api/swagger/{_:.*}")
+                    .url("/api/openapi.json", ApiDoc::openapi()),
+            )
+            .service(handlers::health)
+            .service(handlers::swagger_redirect)
+            .service(users::create_user)
+            .service(users::list_users)
+            .service(users::get_user)
+            .service(users::replace_user)
+            .service(users::update_user)
+            .service(users::delete_user)
             .service(
                 web::scope("/api/v1")
                     .service(handlers::list_alumni)

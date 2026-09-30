@@ -40,7 +40,7 @@ The first `up` seeds MongoDB with sample alumni via the `mongo-seed` container.
 SPA pages: `/` (home), `/alumni` (list), `/about` (placeholder with a Prufrock poem);
 unknown paths fall back to the SPA router's 404 page.
 
-API (all under `/api/v1`, reachable via the API on :8080 or the gateway on :80):
+API under `/api/v1` (reachable via the API on :8080 or the gateway on :80):
 
 | Route | Returns |
 | --- | --- |
@@ -48,6 +48,23 @@ API (all under `/api/v1`, reachable via the API on :8080 or the gateway on :80):
 | `GET /api/v1/hello` | `"hello, world"` |
 | `GET /api/v1/hello/{variable}` | `"hello, {variable}!"` |
 | `GET /api/v1/sum/{num1}/{num2}` | `num1 + num2` as a bare JSON number (f64) |
+
+User CRUD and tooling routes under `/api` (in-memory store, resets on restart —
+see `docs/trade-offs.md`):
+
+| Route | Returns |
+| --- | --- |
+| `GET /api/health` | `{"status": "ok"}` |
+| `POST /api/users` | created user (201; `name`, `email`) |
+| `GET /api/users` | all users, ordered by id |
+| `GET /api/users/{id}` | one user or 404 |
+| `PUT /api/users/{id}` | full replace or 404 |
+| `PATCH /api/users/{id}` | partial update or 404 |
+| `DELETE /api/users/{id}` | 204 or 404 |
+| `GET /api/swagger` | Swagger UI (redirects to `/api/swagger/`) |
+
+All routes are documented interactively in the Swagger UI at
+http://localhost:8080/api/swagger (also on the gateway at http://localhost/api/swagger).
 
 Gateway conveniences on :80 (proxied to the API, see `docs/trade-offs.md`):
 `/hello`, `/hello/{variable}`, `/sum/{num1}/{num2}` — the same responses without the
