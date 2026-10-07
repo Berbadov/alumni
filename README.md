@@ -95,7 +95,8 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 | Model | Sample data and import | `seed/alumni.json`, `mongo-seed` container |
 | Model | Database | `mongo` container |
 | Controller | Route functions for health, hello, sum and alumni | `services/alumni-api/src/handlers.rs` |
-| Controller | Route functions for user CRUD | `services/alumni-api/src/users.rs` |
+| Controller | `UserController`: user CRUD routes under `/api/users` | `services/alumni-api/src/controllers/user_controller.rs` |
+| Controller | `ApiUserController`: user CRUD routes under `/api/v1/users` | `services/alumni-api/src/controllers/api_user_controller.rs` |
 | Controller | Error type and HTTP status mapping `ApiError` | `services/alumni-api/src/error.rs` |
 | Controller | Route registration, `/api/v1` scope, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
 | View | JSON responses that the API returns | Serde derive on the Model structs |

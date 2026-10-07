@@ -13,10 +13,18 @@ database-backed store replaces one file and the routes stay. The methods are syn
 
 ## User routes under `/api` instead of `/api/v1`
 `/api/users`, `/api/health`, and `/api/swagger` were requested without the version prefix,
-which deviates from the "REST under `/api/v1`" rule. Unlike the gateway `/hello` convenience
-(which rewrites to the canonical path), these have no `/api/v1` twin yet. If the project
-formalizes on `/api/v1`, these routes should move or gain twins, and the nginx `/api/`
-proxy needs no change either way.
+which deviates from the "REST under `/api/v1`" rule. `UserController` keeps those unversioned
+routes. `ApiUserController` is the versioned twin under `/api/v1/users` and follows the rule.
+Both call the same `UserStore`, so they show the same data. Cost: two controllers with the
+same six functions and OpenAPI annotations. When clients move to `/api/v1`, delete
+`UserController`. The nginx `/api/` proxy needs no change either way.
+
+## Controllers as modules, not structs
+`#[utoipa::path]` does not work on methods inside an `impl` block (compile error), and the
+actix route macros have the same limit. Each controller is therefore a module of free
+functions with a `configure` function (`controllers/user_controller.rs`,
+`controllers/api_user_controller.rs`), not a struct with methods. Swagger groups the routes by
+`tag` (`UserController`, `ApiUserController`).
 
 ## Swagger UI: utoipa + utoipa-swagger-ui at `/api/swagger/`
 OpenAPI docs generated from `#[utoipa::path]` annotations via `utoipa` 5 + `utoipa-swagger-ui` 9 —
