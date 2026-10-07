@@ -2,6 +2,19 @@
 
 Completed work log, newest first.
 
+## 2026-10-07 — UserController and ApiUserController
+- `alumni-api`: new `src/controllers/` with two controllers, each holding the six CRUD
+  route functions (`create`, `list`, `get`, `replace`, `update`, `delete`) and a `configure`:
+  - `user_controller`: `/api/users` (the existing unversioned routes).
+  - `api_user_controller`: `/api/v1/users` (versioned, registered in the `/api/v1` scope).
+- Both call the shared `UserStore`. `src/users.rs` is removed.
+- Swagger lists both route sets, grouped by the tags `UserController` and `ApiUserController`.
+- Tests: 7 route tests (lifecycle, ordered list and invalid input for each prefix, plus one
+  that checks both prefixes share one store) and 6 model tests. `cargo test` passes (13);
+  clippy shows only the 2 existing `io_other_error` warnings in `main.rs`.
+- Verified in Docker: full CRUD on `/api/v1/users`, cross-prefix reads (create on one prefix,
+  read on the other), 400 and 404 errors, nginx gateway, `/api/openapi.json` lists all paths.
+
 ## 2026-10-07 — User model extracted from the handlers
 - `alumni-api`: new `src/user_store.rs` with the in-memory `UserStore` model (no database,
   no actix types): `create`, `get`, `list`, `replace`, `update`, `delete`, plus the data

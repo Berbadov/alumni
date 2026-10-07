@@ -1,13 +1,14 @@
 #![warn(unsafe_code)]
 
 mod config;
+mod controllers;
 mod error;
 mod handlers;
 mod models;
 mod user_store;
-mod users;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
+use controllers::{api_user_controller, user_controller};
 use mongodb::options::ClientOptions;
 use mongodb::Client;
 use utoipa::OpenApi;
@@ -18,12 +19,18 @@ use utoipa_swagger_ui::SwaggerUi;
     info(title = "alumni-api", version = "0.1.0"),
     paths(
         handlers::health,
-        users::create_user,
-        users::list_users,
-        users::get_user,
-        users::replace_user,
-        users::update_user,
-        users::delete_user,
+        user_controller::create,
+        user_controller::list,
+        user_controller::get,
+        user_controller::replace,
+        user_controller::update,
+        user_controller::delete,
+        api_user_controller::create,
+        api_user_controller::list,
+        api_user_controller::get,
+        api_user_controller::replace,
+        api_user_controller::update,
+        api_user_controller::delete,
     ),
     components(schemas(models::User, models::CreateUser, models::UpdateUser, handlers::Health))
 )]
@@ -59,14 +66,10 @@ async fn main() -> std::io::Result<()> {
             )
             .service(handlers::health)
             .service(handlers::swagger_redirect)
-            .service(users::create_user)
-            .service(users::list_users)
-            .service(users::get_user)
-            .service(users::replace_user)
-            .service(users::update_user)
-            .service(users::delete_user)
+            .configure(user_controller::configure)
             .service(
                 web::scope("/api/v1")
+                    .configure(api_user_controller::configure)
                     .service(handlers::list_alumni)
                     .service(handlers::hello)
                     .service(handlers::hello_name)
