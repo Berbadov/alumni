@@ -1,6 +1,8 @@
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use thiserror::Error;
 
+use crate::user_store::UserError;
+
 #[derive(Debug, Error)]
 pub enum ApiError {
     #[error("database error: {0}")]
@@ -11,6 +13,16 @@ pub enum ApiError {
     BadRequest(String),
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+impl From<UserError> for ApiError {
+    fn from(err: UserError) -> Self {
+        match err {
+            UserError::Invalid(msg) => ApiError::BadRequest(msg.to_owned()),
+            UserError::NotFound => ApiError::NotFound,
+            UserError::Poisoned => ApiError::Internal(err.to_string()),
+        }
+    }
 }
 
 impl ResponseError for ApiError {

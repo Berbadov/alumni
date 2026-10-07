@@ -5,8 +5,11 @@ Decisions and compromises, with rationale.
 ## User store: in-memory vs database
 `/api/users` CRUD keeps users in a `Mutex<BTreeMap>` inside the API process — a direct
 request to not use a database yet. Zero infra cost and trivially testable, but data dies
-with the container and ids restart at 1. Persistence is the top backlog item; the handler
-surface is meant to survive the swap.
+with the container and ids restart at 1. Persistence is the top backlog item. The CRUD
+functions live in `UserStore` (`src/user_store.rs`), separate from the route functions, so a
+database-backed store replaces one file and the routes stay. The methods are synchronous
+(`std::sync::Mutex`); a database store needs `async fn` methods, so the routes will gain
+`.await` calls at that point.
 
 ## User routes under `/api` instead of `/api/v1`
 `/api/users`, `/api/health`, and `/api/swagger` were requested without the version prefix,
