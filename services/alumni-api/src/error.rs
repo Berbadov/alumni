@@ -1,6 +1,7 @@
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use thiserror::Error;
 
+use crate::announcement_store::AnnouncementError;
 use crate::user_store::UserError;
 
 #[derive(Debug, Error)]
@@ -21,6 +22,16 @@ impl From<UserError> for ApiError {
             UserError::Invalid(msg) => ApiError::BadRequest(msg.to_owned()),
             UserError::NotFound => ApiError::NotFound,
             UserError::Poisoned => ApiError::Internal(err.to_string()),
+        }
+    }
+}
+
+impl From<AnnouncementError> for ApiError {
+    fn from(err: AnnouncementError) -> Self {
+        match err {
+            AnnouncementError::Invalid(msg) => ApiError::BadRequest(msg.to_owned()),
+            AnnouncementError::NotFound => ApiError::NotFound,
+            AnnouncementError::Poisoned => ApiError::Internal(err.to_string()),
         }
     }
 }
