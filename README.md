@@ -89,8 +89,8 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 | --- | --- | --- |
 | Model | Data shapes `Alumni`, `User`, `CreateUser`, `UpdateUser` | `services/alumni-api/src/models.rs` |
 | Model | MongoDB collection handle | `AppState` in `main.rs` |
-| Model | In-memory user store `UserStore` | `services/alumni-api/src/users.rs` |
-| Model | Data rules: `validate_name`, `validate_email`, `normalized` | `services/alumni-api/src/users.rs` |
+| Model | In-memory user store `UserStore` with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/user_store.rs` |
+| Model | Data rules: `validate_name`, `validate_email` and the `UserError` type | `services/alumni-api/src/user_store.rs` |
 | Model | Database settings and bind address | `services/alumni-api/src/config.rs` |
 | Model | Sample data and import | `seed/alumni.json`, `mongo-seed` container |
 | Model | Database | `mongo` container |
@@ -122,8 +122,6 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 ### Known gaps
 
 - `list_alumni` in `handlers.rs` queries MongoDB directly. No separate Model function exists.
-- `users.rs` holds the store, the data rules and the routes in one file. The data rules belong
-  to the Model.
 - Two data sources exist: MongoDB for alumni, and memory for users. The user data resets on restart.
   See `docs/trade-offs.md`.
 - The `alumni-model` crate and the `crates/` folder are not in the repository yet. `AGENTS.md`

@@ -2,6 +2,18 @@
 
 Completed work log, newest first.
 
+## 2026-10-07 — User model extracted from the handlers
+- `alumni-api`: new `src/user_store.rs` with the in-memory `UserStore` model (no database,
+  no actix types): `create`, `get`, `list`, `replace`, `update`, `delete`, plus the data
+  rules (`validate_name`, `validate_email`, trim and lowercase).
+- Model errors use `UserError` (`Invalid`, `NotFound`, `Poisoned`). `error.rs` maps it to
+  `ApiError` with `From<UserError>`, so the Model does not know about HTTP.
+- `src/users.rs` now holds only the route functions. Each one calls one `UserStore` method.
+  Routes, status codes and OpenAPI output are unchanged.
+- Tests: 6 unit tests on `UserStore` (no actix) plus the 3 existing route tests.
+  `cargo test` passes (9); clippy shows only the 2 existing `io_other_error` warnings in
+  `main.rs`.
+
 ## 2026-09-30 — `/api/health`, in-memory user CRUD, Swagger UI
 - `alumni-api`: `GET /api/health` returns `{"status":"ok"}`.
 - `alumni-api`: user CRUD in `src/users.rs` with a `UserStore` (`AtomicU64` ids +

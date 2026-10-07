@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod handlers;
 mod models;
+mod user_store;
 mod users;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
@@ -45,7 +46,7 @@ async fn main() -> std::io::Result<()> {
     let collection = client.database(&cfg.mongo_db).collection("alumni");
 
     let state = web::Data::new(AppState { collection });
-    let user_store = web::Data::new(users::UserStore::default());
+    let user_store = web::Data::new(user_store::UserStore::default());
 
     let server = HttpServer::new(move || {
         App::new()
