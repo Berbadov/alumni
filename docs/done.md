@@ -2,6 +2,40 @@
 
 Completed work log, newest first.
 
+## 2026-10-07 — User routes, view layer and web CRUD
+- `UserController` now serves HTML pages. Routes: `GET /users` (list and create form),
+  `POST /users` (create), `GET /users/{id}` (show), `GET /users/{id}/edit` (edit form),
+  `POST /users/{id}` (update), `POST /users/{id}/delete` (delete). HTML forms send only GET
+  and POST. Success redirects with 303. Invalid input shows the page again with status 400,
+  the error and the typed values. A missing user shows an HTML 404 page.
+- `ApiUserController` keeps the JSON CRUD under `/api/v1/users`. The unversioned `/api/users`
+  stays as an alias of the same handlers.
+- New `src/routes/`: `user.rs` and `api_user.rs` define the paths. Controllers hold only
+  handlers. `main.rs` calls `routes::configure` before the `/api/v1` scope.
+- New `src/views/` (maud): `layout.rs` and `users.rs` (index, show, edit, not found).
+- Swagger: all 12 user operations are listed. Tags `UserController` (HTML pages) and
+  `ApiUserController` (JSON) have descriptions. The HTML routes show `text/html` and form
+  request bodies.
+- Gateway: `frontend/nginx.conf` proxies `/users` and `/users/...` to the API.
+- Tests: 21 pass (6 model tests, 6 JSON route tests, 9 page tests).
+  Clippy shows only the 2 existing `io_other_error` warnings in `main.rs`.
+- Verified on a native run of the API (the Docker engine was down): all 6 page routes
+  (200, 303, 400, 404), the JSON routes, `/api/openapi.json` and the Swagger UI. A Docker
+  build and a check through the gateway on port 80 are still open.
+
+## 2026-10-07 — UserController and ApiUserController
+- `alumni-api`: new `src/controllers/` with two controllers, each holding the six CRUD
+  route functions (`create`, `list`, `get`, `replace`, `update`, `delete`) and a `configure`:
+  - `user_controller`: `/api/users` (the existing unversioned routes).
+  - `api_user_controller`: `/api/v1/users` (versioned, registered in the `/api/v1` scope).
+- Both call the shared `UserStore`. `src/users.rs` is removed.
+- Swagger lists both route sets, grouped by the tags `UserController` and `ApiUserController`.
+- Tests: 7 route tests (lifecycle, ordered list and invalid input for each prefix, plus one
+  that checks both prefixes share one store) and 6 model tests. `cargo test` passes (13);
+  clippy shows only the 2 existing `io_other_error` warnings in `main.rs`.
+- Verified in Docker: full CRUD on `/api/v1/users`, cross-prefix reads (create on one prefix,
+  read on the other), 400 and 404 errors, nginx gateway, `/api/openapi.json` lists all paths.
+
 ## 2026-10-07 — User model extracted from the handlers
 - `alumni-api`: new `src/user_store.rs` with the in-memory `UserStore` model (no database,
   no actix types): `create`, `get`, `list`, `replace`, `update`, `delete`, plus the data

@@ -95,9 +95,12 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 | Model | Sample data and import | `seed/alumni.json`, `mongo-seed` container |
 | Model | Database | `mongo` container |
 | Controller | Route functions for health, hello, sum and alumni | `services/alumni-api/src/handlers.rs` |
-| Controller | Route functions for user CRUD | `services/alumni-api/src/users.rs` |
+| Controller | `UserController`: functions for the user pages (list, create, show, edit, update, delete) | `services/alumni-api/src/controllers/user_controller.rs` |
+| Controller | `ApiUserController`: functions for the user JSON CRUD | `services/alumni-api/src/controllers/api_user_controller.rs` |
+| Controller | Route tables: `user.rs` (pages) and `api_user.rs` (JSON) | `services/alumni-api/src/routes/` |
 | Controller | Error type and HTTP status mapping `ApiError` | `services/alumni-api/src/error.rs` |
-| Controller | Route registration, `/api/v1` scope, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
+| Controller | Start of the route tables, `/api/v1` scope, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
+| View | HTML pages for users (maud templates) | `services/alumni-api/src/views/` |
 | View | JSON responses that the API returns | Serde derive on the Model structs |
 
 ### Frontend mapping (planned)
@@ -158,22 +161,37 @@ The API has these routes under `/api/v1`. Use port 8080 for the API or port 80 f
 | `GET /api/v1/hello/{variable}` | `"hello, {variable}!"` |
 | `GET /api/v1/sum/{num1}/{num2}` | `num1 + num2` as a bare JSON number (f64) |
 
-The user CRUD and tool routes are under `/api`. The store is in memory and resets on restart.
-See `docs/trade-offs.md`.
+`ApiUserController` serves the user JSON routes under `/api/v1/users`. The same routes also work
+under `/api/users`. The user store is in memory and resets on restart. See `docs/trade-offs.md`.
 
 | Route | Returns |
 | --- | --- |
+| `POST /api/v1/users` | The new user (status 201). Fields: `name`, `email` |
+| `GET /api/v1/users` | All users, ordered by id |
+| `GET /api/v1/users/{id}` | One user, or status 404 |
+| `PUT /api/v1/users/{id}` | Full replacement, or status 404 |
+| `PATCH /api/v1/users/{id}` | Partial update, or status 404 |
+| `DELETE /api/v1/users/{id}` | Status 204, or status 404 |
 | `GET /api/health` | `{"status": "ok"}` |
-| `POST /api/users` | The new user (status 201). Fields: `name`, `email` |
-| `GET /api/users` | All users, ordered by id |
-| `GET /api/users/{id}` | One user, or status 404 |
-| `PUT /api/users/{id}` | Full replacement, or status 404 |
-| `PATCH /api/users/{id}` | Partial update, or status 404 |
-| `DELETE /api/users/{id}` | Status 204, or status 404 |
 | `GET /api/swagger` | Swagger UI (redirects to `/api/swagger/`) |
 
-The Swagger UI shows all routes: http://localhost:8080/api/swagger. The gateway also serves it
-at http://localhost/api/swagger.
+`UserController` serves the user pages as HTML. An HTML form sends only GET and POST. For this
+reason, update and delete are POST routes. After a successful change, the page redirects
+(status 303). If the input is not valid, the page shows the error with status 400. If the user
+does not exist, the page shows an HTML 404 page.
+
+| Route | Returns |
+| --- | --- |
+| `GET /users` | The user list and the create form |
+| `POST /users` | Creates a user from the form fields `name` and `email` |
+| `GET /users/{id}` | The page for one user |
+| `GET /users/{id}/edit` | The edit form for one user |
+| `POST /users/{id}` | Replaces `name` and `email` of one user |
+| `POST /users/{id}/delete` | Deletes one user |
+
+The Swagger UI shows all user routes, grouped by the tags `UserController` and
+`ApiUserController`: http://localhost:8080/api/swagger. The gateway also serves it at
+http://localhost/api/swagger. The gateway proxies `/users` to the API.
 
 The gateway on port 80 proxies these short routes to the API: `/hello`, `/hello/{variable}` and
 `/sum/{num1}/{num2}`. They return the same responses as the routes without the `/api/v1` prefix.

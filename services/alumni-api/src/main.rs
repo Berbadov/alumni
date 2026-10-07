@@ -1,13 +1,16 @@
 #![warn(unsafe_code)]
 
 mod config;
+mod controllers;
 mod error;
 mod handlers;
 mod models;
+mod routes;
 mod user_store;
-mod users;
+mod views;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
+use controllers::{api_user_controller, user_controller};
 use mongodb::options::ClientOptions;
 use mongodb::Client;
 use utoipa::OpenApi;
@@ -15,15 +18,29 @@ use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "alumni-api", version = "0.1.0"),
+    info(
+        title = "alumni-api",
+        version = "0.1.0",
+        description = "User pages (HTML) and the user REST API (JSON)."
+    ),
+    tags(
+        (name = "UserController", description = "HTML pages under /users: list, create, show, edit, update, delete"),
+        (name = "ApiUserController", description = "JSON user CRUD under /api/v1/users (alias: /api/users)"),
+    ),
     paths(
         handlers::health,
-        users::create_user,
-        users::list_users,
-        users::get_user,
-        users::replace_user,
-        users::update_user,
-        users::delete_user,
+        user_controller::index,
+        user_controller::create,
+        user_controller::show,
+        user_controller::edit,
+        user_controller::update,
+        user_controller::delete,
+        api_user_controller::create,
+        api_user_controller::list,
+        api_user_controller::get,
+        api_user_controller::replace,
+        api_user_controller::update,
+        api_user_controller::delete,
     ),
     components(schemas(models::User, models::CreateUser, models::UpdateUser, handlers::Health))
 )]
@@ -59,12 +76,7 @@ async fn main() -> std::io::Result<()> {
             )
             .service(handlers::health)
             .service(handlers::swagger_redirect)
-            .service(users::create_user)
-            .service(users::list_users)
-            .service(users::get_user)
-            .service(users::replace_user)
-            .service(users::update_user)
-            .service(users::delete_user)
+            .configure(routes::configure)
             .service(
                 web::scope("/api/v1")
                     .service(handlers::list_alumni)
