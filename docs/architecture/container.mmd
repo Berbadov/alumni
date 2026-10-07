@@ -2,7 +2,7 @@
 flowchart TB
     subgraph Host["Host (docker compose)"]
         FE["frontend\nnginx + static SPA\nReact+Tailwind+shadcn/ui\n:80"]
-        API["alumni-api\nactix-web\n:8080\n/users: HTML pages (in-memory)\n/api/v1/users: JSON CRUD\n/api: health, swagger"]
+        API["alumni-api\nactix-web\n:8080\n/users: HTML pages (in-memory)\n/api/v1/users: JSON CRUD\n/announcements: HTML pages (in-memory)\n/api/v1/announcements: JSON CRUD\n/api: health, swagger"]
         Seed["mongo-seed\n(one-shot)"]
         DB["mongo:7\n:27017"]
         Vol[("mongo-data volume")]

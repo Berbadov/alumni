@@ -2,6 +2,29 @@
 
 Completed work log, newest first.
 
+## 2026-10-07 — Announcements: model, controllers, routes, web CRUD
+- `alumni-api`: new `Announcement` model (`id`, `title`, `body`, `author`) with
+  `CreateAnnouncement` / `UpdateAnnouncement` DTOs in `models.rs`, and an in-memory
+  `AnnouncementStore` (`src/announcement_store.rs`) mirroring `UserStore`: sequential ids,
+  trim-on-save, non-empty validation, `AnnouncementError` (`Invalid`, `NotFound`, `Poisoned`)
+  mapped to `ApiError` via `From`.
+- Two controllers, same shape as the user pair:
+  - `AnnouncementController` — HTML pages under `/announcements` (index + create form,
+    show, edit, update, delete), form posts with 303 redirects, 400 re-render on invalid
+    input, HTML 404 page on a missing id. Views in `src/views/announcements.rs` (maud).
+  - `ApiAnnouncementController` — JSON CRUD under `/api/v1/announcements` (alias
+    `/api/announcements`): POST 201, GET list/get, PUT replace, PATCH partial, DELETE 204.
+- Routes: `routes/announcement.rs` and `routes/api_announcement.rs`, wired into
+  `routes::configure`; store registered in `main.rs`. Swagger lists all 12 operations with
+  the new schemas and tags.
+- Gateway: `frontend/nginx.conf` proxies `/announcements` and `/announcements/...` to the API.
+- Tests: 42 pass (6 announcement model tests, 6 JSON route tests per prefix, 9 page tests;
+  user tests unchanged). Clippy shows only the 2 pre-existing `io_other_error` warnings in
+  `main.rs`.
+- Design spec: `docs/superpowers/specs/2026-10-07-announcements-design.md`.
+- Verified natively with `cargo test` + `cargo clippy` (the Docker engine was down);
+  a Docker build and a gateway check on port 80 are still open.
+
 ## 2026-10-07 — User routes, view layer and web CRUD
 - `UserController` now serves HTML pages. Routes: `GET /users` (list and create form),
   `POST /users` (create), `GET /users/{id}` (show), `GET /users/{id}/edit` (edit form),

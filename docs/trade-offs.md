@@ -2,6 +2,14 @@
 
 Decisions and compromises, with rationale.
 
+## Announcements mirror the user feature instead of a shared abstraction
+`AnnouncementStore` repeats the shape of `UserStore` (AtomicU64 ids, `Mutex<BTreeMap>`,
+validation, the same error trio) instead of a generic store keyed by entity. A generic store
+would deduplicate ~100 lines but couple two features that will diverge (announcements gain
+dates/publish state; users gain auth) and force a rewrite of the working user code. The
+announcements are also in-memory: they reset on restart, consistent with users — persistence
+is a backlog item for both.
+
 ## User store: in-memory vs database
 `/api/users` CRUD keeps users in a `Mutex<BTreeMap>` inside the API process — a direct
 request to not use a database yet. Zero infra cost and trivially testable, but data dies

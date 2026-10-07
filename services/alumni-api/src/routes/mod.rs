@@ -1,3 +1,5 @@
+pub mod announcement;
+pub mod api_announcement;
 pub mod api_user;
 pub mod user;
 
@@ -5,7 +7,9 @@ use actix_web::web;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.configure(user::configure)
-        .configure(api_user::configure);
+        .configure(api_user::configure)
+        .configure(announcement::configure)
+        .configure(api_announcement::configure);
 }
 
 #[cfg(test)]
@@ -18,7 +22,8 @@ mod tests {
     use serde_json::json;
 
     use super::configure;
-    use crate::models::User;
+    use crate::announcement_store::AnnouncementStore;
+    use crate::models::{Announcement, User};
     use crate::user_store::UserStore;
 
     macro_rules! test_app {
@@ -26,6 +31,7 @@ mod tests {
             test::init_service(
                 App::new()
                     .app_data(web::Data::new(UserStore::default()))
+                    .app_data(web::Data::new(AnnouncementStore::default()))
                     .configure(configure),
             )
             .await
@@ -314,6 +320,305 @@ mod tests {
             TestRequest::get().uri("/users/99/edit").to_request(),
             form_post("/users/99", "name=Ada&email=ada%40example.com").to_request(),
             form_post("/users/99/delete", "").to_request(),
+        ];
+        for req in requests {
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+            let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
+            assert!(content_type.starts_with("text/html"));
+        }
+    }
+
+    macro_rules! announcement_api_tests {
+        ($module:ident, $base:literal) => {
+            mod $module {
+                use super::*;
+
+                #[actix_web::test]
+                async fn create_get_patch_put_delete_lifecycle() {
+                    let app = test_app!();
+                    let base = $base;
+
+                    let req = TestRequest::post()
+                        .uri(base)
+                        .set_json(json!({ "title": "  Reunion  ", "body": "  Save the date  ", "author": " Ada " }))
+                        .to_request();
+                    let resp = test::call_service(&app, req).await;
+                    assert_eq!(resp.status(), StatusCode::CREATED);
+                    let created: Announcement = test::read_body_json(resp).await;
+                    assert_eq!(created.id, 1);
+                    assert_eq!(created.title, "Reunion");
+                    assert_eq!(created.body, "Save the date");
+                    assert_eq!(created.author, "Ada");
+
+                    let uri = format!("{base}/1");
+                    let announcement: Announcement = test::call_and_read_body_json(
+                        &app,
+                        TestRequest::get().uri(&uri).to_request(),
+                    )
+                    .await;
+                    assert_eq!(announcement.title, "Reunion");
+
+                    let req = TestRequest::patch()
+                        .uri(&uri)
+                        .set_json(json!({ "title": "Picnic" }))
+                        .to_request();
+                    let resp = test::call_service(&app, req).await;
+                    assert_eq!(resp.status(), StatusCode::OK);
+                    let patched: Announcement = test::read_body_json(resp).await;
+                    assert_eq!(patched.title, "Picnic");
+                    assert_eq!(patched.body, "Save the date");
+
+                    let req = TestRequest::put()
+                        .uri(&uri)
+                        .set_json(json!({ "title": "Fair", "body": "New body", "author": "Grace" }))
+                        .to_request();
+                    let resp = test::call_service(&app, req).await;
+                    assert_eq!(resp.status(), StatusCode::OK);
+                    let replaced: Announcement = test::read_body_json(resp).await;
+                    assert_eq!(replaced.title, "Fair");
+                    assert_eq!(replaced.author, "Grace");
+
+                    let resp =
+                        test::call_service(&app, TestRequest::delete().uri(&uri).to_request()).await;
+                    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+                    let resp =
+                        test::call_service(&app, TestRequest::get().uri(&uri).to_request()).await;
+                    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+                }
+
+                #[actix_web::test]
+                async fn list_returns_all_in_id_order() {
+                    let app = test_app!();
+                    let base = $base;
+
+                    for title in ["first", "second"] {
+                        let req = TestRequest::post()
+                            .uri(base)
+                            .set_json(json!({ "title": title, "body": "body", "author": "Ada" }))
+                            .to_request();
+                        let resp = test::call_service(&app, req).await;
+                        assert_eq!(resp.status(), StatusCode::CREATED);
+                    }
+
+                    let announcements: Vec<Announcement> = test::call_and_read_body_json(
+                        &app,
+                        TestRequest::get().uri(base).to_request(),
+                    )
+                    .await;
+                    assert_eq!(announcements.len(), 2);
+                    assert_eq!(announcements[0].title, "first");
+                    assert_eq!(announcements[1].title, "second");
+                }
+
+                #[actix_web::test]
+                async fn rejects_invalid_input() {
+                    let app = test_app!();
+                    let base = $base;
+
+                    for body in [
+                        json!({ "title": "", "body": "body", "author": "Ada" }),
+                        json!({ "title": "Title", "body": "", "author": "Ada" }),
+                        json!({ "title": "Title", "body": "body", "author": "" }),
+                    ] {
+                        let req = TestRequest::post().uri(base).set_json(&body).to_request();
+                        let resp = test::call_service(&app, req).await;
+                        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+                    }
+
+                    let req = TestRequest::patch()
+                        .uri(&format!("{base}/999"))
+                        .set_json(json!({ "title": "Ghost" }))
+                        .to_request();
+                    let resp = test::call_service(&app, req).await;
+                    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+                }
+            }
+        };
+    }
+
+    announcement_api_tests!(announcement_versioned, "/api/v1/announcements");
+    announcement_api_tests!(announcement_unversioned, "/api/announcements");
+
+    fn announcement_form_post(uri: &str, payload: &str) -> TestRequest {
+        TestRequest::post()
+            .uri(uri)
+            .insert_header(ContentType::form_url_encoded())
+            .set_payload(payload.to_owned())
+    }
+
+    macro_rules! seed_announcement {
+        ($app:expr) => {
+            let req = TestRequest::post()
+                .uri("/api/v1/announcements")
+                .set_json(json!({ "title": "Reunion", "body": "Save the date", "author": "Ada" }))
+                .to_request();
+            assert_eq!(test::call_service(&$app, req).await.status(), StatusCode::CREATED);
+        };
+    }
+
+    #[actix_web::test]
+    async fn announcements_page_lists_and_escapes_html() {
+        let app = test_app!();
+        let req = TestRequest::post()
+            .uri("/api/v1/announcements")
+            .set_json(json!({ "title": "<b>Reunion</b>", "body": "Save the date", "author": "Ada" }))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, req).await.status(),
+            StatusCode::CREATED
+        );
+
+        let resp = test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
+        assert!(content_type.starts_with("text/html"));
+        let body = body_text(resp).await;
+        assert!(body.contains("&lt;b&gt;Reunion&lt;/b&gt;"));
+        assert!(!body.contains("<b>Reunion</b>"));
+    }
+
+    #[actix_web::test]
+    async fn announcement_form_post_creates_and_redirects() {
+        let app = test_app!();
+        let req = announcement_form_post(
+            "/announcements",
+            "title=Reunion&body=Save+the+date&author=Ada",
+        )
+        .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/announcements");
+
+        let announcement: Announcement = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+        )
+        .await;
+        assert_eq!(announcement.title, "Reunion");
+        assert_eq!(announcement.body, "Save the date");
+    }
+
+    #[actix_web::test]
+    async fn announcement_form_post_with_invalid_input_shows_the_error() {
+        let app = test_app!();
+        let req =
+            announcement_form_post("/announcements", "title=&body=Save+the+date&author=Ada").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_text(resp).await;
+        assert!(body.contains("title must not be empty"));
+        assert!(body.contains("Save the date"));
+    }
+
+    #[actix_web::test]
+    async fn announcements_index_page_links_each_row_to_show_edit_and_delete() {
+        let app = test_app!();
+        seed_announcement!(app);
+
+        let resp = test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
+        let body = body_text(resp).await;
+        assert!(body.contains(r#"href="/announcements/1""#));
+        assert!(body.contains(r#"href="/announcements/1/edit""#));
+        assert!(body.contains(r#"action="/announcements/1/delete""#));
+    }
+
+    #[actix_web::test]
+    async fn announcement_show_and_edit_pages_render_the_announcement() {
+        let app = test_app!();
+        seed_announcement!(app);
+
+        let resp =
+            test::call_service(&app, TestRequest::get().uri("/announcements/1").to_request()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_text(resp).await;
+        assert!(body.contains("Save the date"));
+        assert!(body.contains(r#"href="/announcements/1/edit""#));
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::get().uri("/announcements/1/edit").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_text(resp).await;
+        assert!(body.contains(r#"value="Reunion""#));
+        assert!(body.contains(r#"action="/announcements/1""#));
+    }
+
+    #[actix_web::test]
+    async fn announcement_form_post_updates_and_redirects() {
+        let app = test_app!();
+        seed_announcement!(app);
+
+        let resp = test::call_service(
+            &app,
+            announcement_form_post(
+                "/announcements/1",
+                "title=Picnic&body=Bring+food&author=Grace",
+            )
+            .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/announcements/1");
+
+        let announcement: Announcement = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+        )
+        .await;
+        assert_eq!(announcement.title, "Picnic");
+        assert_eq!(announcement.author, "Grace");
+    }
+
+    #[actix_web::test]
+    async fn announcement_form_post_update_with_invalid_input_shows_the_edit_page_with_error() {
+        let app = test_app!();
+        seed_announcement!(app);
+
+        let resp = test::call_service(
+            &app,
+            announcement_form_post("/announcements/1", "title=&body=Bring+food&author=Grace").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_text(resp).await;
+        assert!(body.contains("title must not be empty"));
+        assert!(body.contains(r#"value="Grace""#));
+    }
+
+    #[actix_web::test]
+    async fn announcement_form_post_deletes_and_redirects() {
+        let app = test_app!();
+        seed_announcement!(app);
+
+        let resp = test::call_service(
+            &app,
+            announcement_form_post("/announcements/1/delete", "").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/announcements");
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn missing_announcement_renders_an_html_404_page() {
+        let app = test_app!();
+
+        let requests = [
+            TestRequest::get().uri("/announcements/99").to_request(),
+            TestRequest::get().uri("/announcements/99/edit").to_request(),
+            announcement_form_post("/announcements/99", "title=T&body=B&author=A").to_request(),
+            announcement_form_post("/announcements/99/delete", "").to_request(),
         ];
         for req in requests {
             let resp = test::call_service(&app, req).await;

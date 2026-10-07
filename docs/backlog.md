@@ -4,11 +4,12 @@ Planned work, prioritized top to bottom. Move items to `done.md` when complete
 and record the rationale in `trade-offs.md` if the choice is non-obvious.
 
 ## Next
-- [ ] **Persist users** — move `/api/users` from the in-memory store to MongoDB (or merge into the alumni CRUD item).
+- [ ] **Persist users and announcements** — move the in-memory stores to MongoDB (or merge into the alumni CRUD item).
 - [ ] **Alumni CRUD** — `POST`, `PUT`, `DELETE` for `/api/v1/alumni`; input validation; frontend form via shadcn `Button`/`Input`.
 - [ ] **Schema hardening** — required vs optional fields, email format, unique email index.
 
 ## Later
+- [ ] **Announcements React page** — management/list UI in the frontend talking to `/api/v1/announcements`.
 - [ ] **About page content** — replace the Prufrock placeholder with real project/team info.
 - [ ] **Search / filter** — query by graduation year, degree, name; pagination + sorting.
 - [ ] **Alumni profiles** — individual detail page + `GET /api/v1/alumni/{id}`.
