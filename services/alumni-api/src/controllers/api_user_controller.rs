@@ -1,25 +1,10 @@
-//! `ApiUserController`: versioned user routes under `/api/v1/users`. Register inside the `/api/v1` scope.
+//! `ApiUserController`: JSON user CRUD under `/api/v1/users`. Routes are defined in `routes::api_user`.
 
 use actix_web::{HttpResponse, web};
 
 use crate::error::ApiError;
 use crate::models::{CreateUser, UpdateUser, User};
 use crate::user_store::UserStore;
-
-pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::resource("/users")
-            .route(web::get().to(list))
-            .route(web::post().to(create)),
-    )
-    .service(
-        web::resource("/users/{id}")
-            .route(web::get().to(get))
-            .route(web::put().to(replace))
-            .route(web::patch().to(update))
-            .route(web::delete().to(delete)),
-    );
-}
 
 /// Creates a user from the validated request body.
 #[utoipa::path(

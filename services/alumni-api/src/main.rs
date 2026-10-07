@@ -5,7 +5,9 @@ mod controllers;
 mod error;
 mod handlers;
 mod models;
+mod routes;
 mod user_store;
+mod views;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use controllers::{api_user_controller, user_controller};
@@ -16,13 +18,21 @@ use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "alumni-api", version = "0.1.0"),
+    info(
+        title = "alumni-api",
+        version = "0.1.0",
+        description = "User pages (HTML) and the user REST API (JSON)."
+    ),
+    tags(
+        (name = "UserController", description = "HTML pages under /users: list, create, show, edit, update, delete"),
+        (name = "ApiUserController", description = "JSON user CRUD under /api/v1/users (alias: /api/users)"),
+    ),
     paths(
         handlers::health,
+        user_controller::index,
         user_controller::create,
-        user_controller::list,
-        user_controller::get,
-        user_controller::replace,
+        user_controller::show,
+        user_controller::edit,
         user_controller::update,
         user_controller::delete,
         api_user_controller::create,
@@ -66,10 +76,9 @@ async fn main() -> std::io::Result<()> {
             )
             .service(handlers::health)
             .service(handlers::swagger_redirect)
-            .configure(user_controller::configure)
+            .configure(routes::configure)
             .service(
                 web::scope("/api/v1")
-                    .configure(api_user_controller::configure)
                     .service(handlers::list_alumni)
                     .service(handlers::hello)
                     .service(handlers::hello_name)

@@ -1,133 +1,179 @@
-//! `UserController`: unversioned user routes under `/api/users`.
+//! `UserController`: HTML pages for users. Routes are defined in `routes::user`.
+//!
+//! HTML forms only send GET and POST, so update and delete are POST routes.
 
+use actix_web::http::StatusCode;
+use actix_web::http::header::{ContentType, LOCATION};
 use actix_web::{HttpResponse, web};
+use maud::Markup;
 
 use crate::error::ApiError;
-use crate::models::{CreateUser, UpdateUser, User};
-use crate::user_store::UserStore;
+use crate::models::CreateUser;
+use crate::user_store::{UserError, UserStore};
+use crate::views::users::{self, Draft};
 
-pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::resource("/api/users")
-            .route(web::get().to(list))
-            .route(web::post().to(create)),
-    )
-    .service(
-        web::resource("/api/users/{id}")
-            .route(web::get().to(get))
-            .route(web::put().to(replace))
-            .route(web::patch().to(update))
-            .route(web::delete().to(delete)),
-    );
+fn html(status: StatusCode, page: Markup) -> HttpResponse {
+    HttpResponse::build(status)
+        .content_type(ContentType::html())
+        .body(page.into_string())
 }
 
-/// Creates a user from the validated request body.
+fn see_other(location: &str) -> HttpResponse {
+    HttpResponse::SeeOther()
+        .insert_header((LOCATION, location))
+        .finish()
+}
+
+/// Turns a missing user into an HTML 404 page instead of a JSON error.
+fn respond(result: Result<HttpResponse, UserError>) -> Result<HttpResponse, ApiError> {
+    match result {
+        Err(UserError::NotFound) => Ok(html(StatusCode::NOT_FOUND, users::not_found())),
+        other => Ok(other?),
+    }
+}
+
+/// Lists the users and shows the create form.
+#[utoipa::path(
+    get,
+    path = "/users",
+    tag = "UserController",
+    responses(
+        (status = 200, description = "HTML page with the user list and a create form",
+            content_type = "text/html", body = String),
+    ),
+)]
+pub async fn index(store: web::Data<UserStore>) -> Result<HttpResponse, ApiError> {
+    respond(
+        store
+            .list()
+            .map(|all| html(StatusCode::OK, users::index(&all, None))),
+    )
+}
+
+/// Creates a user from the form, then redirects to `/users`.
 #[utoipa::path(
     post,
-    path = "/api/users",
+    path = "/users",
     tag = "UserController",
-    request_body = CreateUser,
+    request_body(content = CreateUser, content_type = "application/x-www-form-urlencoded"),
     responses(
-        (status = 201, description = "User created", body = User),
-        (status = 400, description = "Invalid name or email"),
+        (status = 303, description = "User created; redirects to /users"),
+        (status = 400, description = "Invalid name or email; HTML page with the error",
+            content_type = "text/html", body = String),
     ),
 )]
 pub async fn create(
     store: web::Data<UserStore>,
-    body: web::Json<CreateUser>,
+    form: web::Form<CreateUser>,
 ) -> Result<HttpResponse, ApiError> {
-    let user = store.create(&body)?;
-    Ok(HttpResponse::Created().json(user))
+    respond(match store.create(&form) {
+        Ok(_) => Ok(see_other("/users")),
+        Err(UserError::Invalid(error)) => store.list().map(|all| {
+            let draft = Draft {
+                input: &form,
+                error,
+            };
+            html(StatusCode::BAD_REQUEST, users::index(&all, Some(&draft)))
+        }),
+        Err(err) => Err(err),
+    })
 }
 
-/// Lists all users, ordered by id.
+/// Shows one user.
 #[utoipa::path(
     get,
-    path = "/api/users",
+    path = "/users/{id}",
     tag = "UserController",
-    responses((status = 200, description = "All users", body = [User])),
+    params(("id" = u64, Path, description = "User id")),
+    responses(
+        (status = 200, description = "HTML page with the user", content_type = "text/html", body = String),
+        (status = 404, description = "HTML page: no user with that id", content_type = "text/html", body = String),
+    ),
 )]
-pub async fn list(store: web::Data<UserStore>) -> Result<web::Json<Vec<User>>, ApiError> {
-    Ok(web::Json(store.list()?))
+pub async fn show(
+    store: web::Data<UserStore>,
+    path: web::Path<u64>,
+) -> Result<HttpResponse, ApiError> {
+    respond(
+        store
+            .get(path.into_inner())
+            .map(|user| html(StatusCode::OK, users::show(&user))),
+    )
 }
 
-/// Returns one user by id.
+/// Shows the edit form for one user.
 #[utoipa::path(
     get,
-    path = "/api/users/{id}",
+    path = "/users/{id}/edit",
     tag = "UserController",
     params(("id" = u64, Path, description = "User id")),
     responses(
-        (status = 200, description = "The user", body = User),
-        (status = 404, description = "No user with that id"),
+        (status = 200, description = "HTML page with the edit form", content_type = "text/html", body = String),
+        (status = 404, description = "HTML page: no user with that id", content_type = "text/html", body = String),
     ),
 )]
-pub async fn get(
+pub async fn edit(
     store: web::Data<UserStore>,
     path: web::Path<u64>,
-) -> Result<web::Json<User>, ApiError> {
-    Ok(web::Json(store.get(path.into_inner())?))
+) -> Result<HttpResponse, ApiError> {
+    respond(
+        store
+            .get(path.into_inner())
+            .map(|user| html(StatusCode::OK, users::edit(&user, None))),
+    )
 }
 
-/// Replaces every field of a user (404 if the id does not exist).
+/// Replaces the name and email of a user from the form, then redirects to the user page.
 #[utoipa::path(
-    put,
-    path = "/api/users/{id}",
+    post,
+    path = "/users/{id}",
     tag = "UserController",
-    request_body = CreateUser,
     params(("id" = u64, Path, description = "User id")),
+    request_body(content = CreateUser, content_type = "application/x-www-form-urlencoded"),
     responses(
-        (status = 200, description = "User replaced", body = User),
-        (status = 400, description = "Invalid name or email"),
-        (status = 404, description = "No user with that id"),
-    ),
-)]
-pub async fn replace(
-    store: web::Data<UserStore>,
-    path: web::Path<u64>,
-    body: web::Json<CreateUser>,
-) -> Result<web::Json<User>, ApiError> {
-    Ok(web::Json(store.replace(path.into_inner(), &body)?))
-}
-
-/// Applies a partial update to a user (only provided fields change).
-#[utoipa::path(
-    patch,
-    path = "/api/users/{id}",
-    tag = "UserController",
-    request_body = UpdateUser,
-    params(("id" = u64, Path, description = "User id")),
-    responses(
-        (status = 200, description = "User updated", body = User),
-        (status = 400, description = "Invalid name or email"),
-        (status = 404, description = "No user with that id"),
+        (status = 303, description = "User updated; redirects to /users/{id}"),
+        (status = 400, description = "Invalid name or email; HTML edit page with the error",
+            content_type = "text/html", body = String),
+        (status = 404, description = "HTML page: no user with that id", content_type = "text/html", body = String),
     ),
 )]
 pub async fn update(
     store: web::Data<UserStore>,
     path: web::Path<u64>,
-    body: web::Json<UpdateUser>,
-) -> Result<web::Json<User>, ApiError> {
-    Ok(web::Json(
-        store.update(path.into_inner(), body.into_inner())?,
-    ))
+    form: web::Form<CreateUser>,
+) -> Result<HttpResponse, ApiError> {
+    let id = path.into_inner();
+    respond(match store.replace(id, &form) {
+        Ok(_) => Ok(see_other(&format!("/users/{id}"))),
+        Err(UserError::Invalid(error)) => store.get(id).map(|user| {
+            let draft = Draft {
+                input: &form,
+                error,
+            };
+            html(StatusCode::BAD_REQUEST, users::edit(&user, Some(&draft)))
+        }),
+        Err(err) => Err(err),
+    })
 }
 
-/// Deletes a user by id.
+/// Deletes a user, then redirects to `/users`.
 #[utoipa::path(
-    delete,
-    path = "/api/users/{id}",
+    post,
+    path = "/users/{id}/delete",
     tag = "UserController",
     params(("id" = u64, Path, description = "User id")),
     responses(
-        (status = 204, description = "User deleted"),
-        (status = 404, description = "No user with that id"),
+        (status = 303, description = "User deleted; redirects to /users"),
+        (status = 404, description = "HTML page: no user with that id", content_type = "text/html", body = String),
     ),
 )]
 pub async fn delete(
     store: web::Data<UserStore>,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
-    store.delete(path.into_inner())?;
-    Ok(HttpResponse::NoContent().finish())
+    respond(
+        store
+            .delete(path.into_inner())
+            .map(|()| see_other("/users")),
+    )
 }

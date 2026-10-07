@@ -13,18 +13,39 @@ database-backed store replaces one file and the routes stay. The methods are syn
 
 ## User routes under `/api` instead of `/api/v1`
 `/api/users`, `/api/health`, and `/api/swagger` were requested without the version prefix,
-which deviates from the "REST under `/api/v1`" rule. `UserController` keeps those unversioned
-routes. `ApiUserController` is the versioned twin under `/api/v1/users` and follows the rule.
-Both call the same `UserStore`, so they show the same data. Cost: two controllers with the
-same six functions and OpenAPI annotations. When clients move to `/api/v1`, delete
-`UserController`. The nginx `/api/` proxy needs no change either way.
+which deviates from the "REST under `/api/v1`" rule. `ApiUserController` serves the versioned
+JSON routes under `/api/v1/users` and follows the rule. It also serves `/api/users` as an alias
+of the same handlers, so the requested URL keeps working. Swagger documents only
+`/api/v1/users`, because one handler carries one `#[utoipa::path]` annotation. When clients use
+`/api/v1`, remove the alias (`BASES` in `routes/api_user.rs`).
+
+## UserController serves HTML, ApiUserController serves JSON
+`UserController` renders HTML pages under `/users`: list, create, show, edit, update and
+delete. `ApiUserController` returns JSON under `/api/v1/users`. Both call the same `UserStore`.
+Cost: the two controllers repeat the same six operations in two formats. HTML forms send only
+GET and POST, so the pages use `POST /users/{id}` to update and `POST /users/{id}/delete` to
+delete, not PUT and DELETE. A missing user shows an HTML 404 page, not the JSON error. Create
+and update redirect (303) after success, so a page reload does not send the form again.
+
+## Route tables apart from controllers
+Paths live in `routes/` (`user.rs` for pages, `api_user.rs` for JSON). Controllers hold only
+handlers. One file per controller shows every path. Cost: each path also appears in the
+`#[utoipa::path]` annotation, because the annotation needs a literal string. Keep both in sync.
+The route tests in `routes/mod.rs` catch a mismatch for the paths they use.
 
 ## Controllers as modules, not structs
 `#[utoipa::path]` does not work on methods inside an `impl` block (compile error), and the
 actix route macros have the same limit. Each controller is therefore a module of free
-functions with a `configure` function (`controllers/user_controller.rs`,
-`controllers/api_user_controller.rs`), not a struct with methods. Swagger groups the routes by
-`tag` (`UserController`, `ApiUserController`).
+functions (`controllers/user_controller.rs`, `controllers/api_user_controller.rs`), not a
+struct with methods. Swagger groups the routes by `tag` (`UserController`, `ApiUserController`).
+
+## HTML views: maud templates
+The views (`src/views/`) use `maud`: templates are Rust code that the compiler checks, and
+maud escapes every value by default, so a user name such as `<b>x</b>` cannot inject HTML.
+`format!` strings would need hand-written escaping. `askama` would add separate template
+files. Cost: one more dependency, and the HTML lives in Rust code, not in `.html` files.
+The page style is a small inline CSS string in `views/layout.rs`, separate from the React
+frontend's Tailwind theme (the colours match).
 
 ## Swagger UI: utoipa + utoipa-swagger-ui at `/api/swagger/`
 OpenAPI docs generated from `#[utoipa::path]` annotations via `utoipa` 5 + `utoipa-swagger-ui` 9 —
