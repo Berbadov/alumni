@@ -11,6 +11,9 @@ services:
       timeout: 5s
       retries: 10
 
+  # Development seed only. Never point it at production data.
+  # See docs/ddd.md (Seed and migration). It resets counters
+  # to match the seed rows.
   mongo-seed:
     image: mongo:7
     depends_on:
@@ -19,16 +22,20 @@ services:
     volumes:
       - ./services/alumni-api/seed:/seed
     command: >
+      bash -c '
       mongoimport --host mongo --db alumni --collection alumni
-      --drop --jsonArray --file /seed/alumni.json
+      --drop --jsonArray --file /seed/alumni.json &&
+      mongosh --host mongo --quiet alumni --eval
+      "db.counters.updateOne({_id: \"alumni\"}, {$$set: {seq: 3}}, {upsert: true});
+       db.counters.updateOne({_id: \"announcements\"}, {$$set: {seq: 0}}, {upsert: true})"'
 
   alumni-api:
     build: ./services/alumni-api
     environment:
-      MONGO_URI: mongodb://mongo:27017
-      MONGO_DB: alumni
-      BIND_ADDR: 0.0.0.0:8080
-      RUST_LOG: info
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017}
+      MONGO_DB: ${MONGO_DB:-alumni}
+      BIND_ADDR: ${BIND_ADDR:-0.0.0.0:8080}
+      RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "8080:8080"
     depends_on:

@@ -131,6 +131,8 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
   must list the `crates/` folder when you add it.
 - Docker builds for `alumni-api` and the frontend must use the repository root as build context
   to read the shared crate.
+- `docs/ddd.md` defines the target database design. It merges users into alumni
+  and adds `counters` and timestamps. The code does not use it yet.
 
 ## Run
 
@@ -203,5 +205,6 @@ See `docs/trade-offs.md`.
 - `docs/backlog.md` - planned work, in priority order.
 - `docs/done.md` - log of completed work.
 - `docs/trade-offs.md` - decisions and compromises.
+- `docs/ddd.md` - target database design (collections, indexes, data rules).
 
 Read `AGENTS.md` for the rules that agents and contributors must obey.
