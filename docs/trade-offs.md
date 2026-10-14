@@ -2,6 +2,34 @@
 
 Decisions and compromises, with rationale.
 
+## Migration: tests need a live MongoDB
+Route tests connect to MongoDB (`MONGO_URI` or `localhost:27017`) and use one
+fresh database per test, dropped after. Pure data rules stay unit-tested with
+no database. Cost: `cargo test` fails with no MongoDB; leftover `alumni_test_*`
+databases stay behind when a test panics before cleanup.
+
+## Migration: RFC3339 strings in JSON, BSON dates in storage
+One struct serves the View and the JSON API, so timestamps travel as RFC3339
+strings (`created_at`, `updated_at`). Stores convert to BSON dates on write
+and back on read. Cost: two conversions per round trip; hand-written docs
+instead of derived BSON serde.
+
+## Migration: failed writes consume counter ids
+`next_id` runs before the insert, so a duplicate email burns one id. Ids stay
+unique but not gapless. Filling gaps would need a free-list and removes the
+one-call atomic counter.
+
+## Migration: the reader tolerates doubles
+`mongoimport` stores bare JSON numbers as doubles. `from_doc` accepts
+int32, int64, and integral doubles. The seed still uses extended JSON int
+types (`$numberLong`, `$numberInt`, `$date`) so stored data matches `ddd.md`.
+
+## Migration: the API starts after the seed
+`alumni-api` waits for `mongo-seed` (`service_completed_successfully`).
+The first boot built the email index while `--drop` ran, and MongoDB aborted
+the index build, which killed startup. Cost: every `up` runs seed then API
+in strict order, even when the seed changes nothing.
+
 ## Announcements mirror the user feature instead of a shared abstraction
 `AnnouncementStore` repeats the shape of `UserStore` (AtomicU64 ids, `Mutex<BTreeMap>`,
 validation, the same error trio) instead of a generic store keyed by entity. A generic store

@@ -8,9 +8,9 @@ use actix_web::http::header::{ContentType, LOCATION};
 use actix_web::{HttpResponse, web};
 use maud::Markup;
 
-use crate::announcement_store::{AnnouncementError, AnnouncementStore};
+use crate::AppState;
 use crate::error::ApiError;
-use crate::models::CreateAnnouncement;
+use crate::models::{CreateAnnouncement, ModelError};
 use crate::views::announcements::{self, Draft};
 
 fn html(status: StatusCode, page: Markup) -> HttpResponse {
@@ -26,11 +26,9 @@ fn see_other(location: &str) -> HttpResponse {
 }
 
 /// Turns a missing announcement into an HTML 404 page instead of a JSON error.
-fn respond(result: Result<HttpResponse, AnnouncementError>) -> Result<HttpResponse, ApiError> {
+fn respond(result: Result<HttpResponse, ModelError>) -> Result<HttpResponse, ApiError> {
     match result {
-        Err(AnnouncementError::NotFound) => {
-            Ok(html(StatusCode::NOT_FOUND, announcements::not_found()))
-        }
+        Err(ModelError::NotFound) => Ok(html(StatusCode::NOT_FOUND, announcements::not_found())),
         other => Ok(other?),
     }
 }
@@ -45,10 +43,12 @@ fn respond(result: Result<HttpResponse, AnnouncementError>) -> Result<HttpRespon
             content_type = "text/html", body = String),
     ),
 )]
-pub async fn index(store: web::Data<AnnouncementStore>) -> Result<HttpResponse, ApiError> {
+pub async fn index(state: web::Data<AppState>) -> Result<HttpResponse, ApiError> {
     respond(
-        store
+        state
+            .announcements
             .list()
+            .await
             .map(|all| html(StatusCode::OK, announcements::index(&all, None))),
     )
 }
@@ -66,12 +66,12 @@ pub async fn index(store: web::Data<AnnouncementStore>) -> Result<HttpResponse, 
     ),
 )]
 pub async fn create(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     form: web::Form<CreateAnnouncement>,
 ) -> Result<HttpResponse, ApiError> {
-    respond(match store.create(&form) {
+    respond(match state.announcements.create(&form).await {
         Ok(_) => Ok(see_other("/announcements")),
-        Err(AnnouncementError::Invalid(error)) => store.list().map(|all| {
+        Err(ModelError::Invalid(error)) => state.announcements.list().await.map(|all| {
             let draft = Draft {
                 input: &form,
                 error,
@@ -94,12 +94,14 @@ pub async fn create(
     ),
 )]
 pub async fn show(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
     respond(
-        store
+        state
+            .announcements
             .get(path.into_inner())
+            .await
             .map(|announcement| html(StatusCode::OK, announcements::show(&announcement))),
     )
 }
@@ -116,12 +118,14 @@ pub async fn show(
     ),
 )]
 pub async fn edit(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
     respond(
-        store
+        state
+            .announcements
             .get(path.into_inner())
+            .await
             .map(|announcement| html(StatusCode::OK, announcements::edit(&announcement, None))),
     )
 }
@@ -141,14 +145,14 @@ pub async fn edit(
     ),
 )]
 pub async fn update(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
     form: web::Form<CreateAnnouncement>,
 ) -> Result<HttpResponse, ApiError> {
     let id = path.into_inner();
-    respond(match store.replace(id, &form) {
+    respond(match state.announcements.replace(id, &form).await {
         Ok(_) => Ok(see_other(&format!("/announcements/{id}"))),
-        Err(AnnouncementError::Invalid(error)) => store.get(id).map(|announcement| {
+        Err(ModelError::Invalid(error)) => state.announcements.get(id).await.map(|announcement| {
             let draft = Draft {
                 input: &form,
                 error,
@@ -174,12 +178,14 @@ pub async fn update(
     ),
 )]
 pub async fn delete(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
     respond(
-        store
+        state
+            .announcements
             .delete(path.into_inner())
+            .await
             .map(|()| see_other("/announcements")),
     )
 }

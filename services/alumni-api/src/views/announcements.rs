@@ -8,11 +8,11 @@ pub struct Draft<'a> {
     pub error: &'a str,
 }
 
-fn announcement_fields(title: &str, body: &str, author: &str) -> Markup {
+fn announcement_fields(title: &str, body: &str, author_id: u64) -> Markup {
     html! {
         label { "Title" input name="title" required value=(title); }
         label { "Body" textarea name="body" required rows="4" { (body) } }
-        label { "Author" input name="author" required value=(author); }
+        label { "Author id" input name="author_id" type="number" min="1" required value=(author_id); }
     }
 }
 
@@ -33,11 +33,11 @@ fn delete_form(announcement: &Announcement) -> Markup {
 }
 
 pub fn index(announcements: &[Announcement], draft: Option<&Draft>) -> Markup {
-    let (title, body, author) = draft.map_or(("", "", ""), |d| {
+    let (title, body, author_id) = draft.map_or(("", "", 0), |d| {
         (
             d.input.title.as_str(),
             d.input.body.as_str(),
-            d.input.author.as_str(),
+            d.input.author_id,
         )
     });
 
@@ -48,13 +48,13 @@ pub fn index(announcements: &[Announcement], draft: Option<&Draft>) -> Markup {
                 p { "No announcements yet." }
             } @else {
                 table {
-                    thead { tr { th { "Id" } th { "Title" } th { "Author" } th { "Actions" } } }
+                    thead { tr { th { "Id" } th { "Title" } th { "Author id" } th { "Actions" } } }
                     tbody {
                         @for announcement in announcements {
                             tr {
                                 td { (announcement.id) }
                                 td { (announcement.title) }
-                                td { (announcement.author) }
+                                td { (announcement.author_id) }
                                 td {
                                     a href={ "/announcements/" (announcement.id) } { "Show" }
                                     a href={ "/announcements/" (announcement.id) "/edit" } { "Edit" }
@@ -68,7 +68,7 @@ pub fn index(announcements: &[Announcement], draft: Option<&Draft>) -> Markup {
             h2 { "Add announcement" }
             (error_message(draft))
             form method="post" action="/announcements" {
-                (announcement_fields(title, body, author))
+                (announcement_fields(title, body, author_id))
                 button type="submit" { "Create announcement" }
             }
         },
@@ -83,7 +83,7 @@ pub fn show(announcement: &Announcement) -> Markup {
                 dt { "Id" } dd { (announcement.id) }
                 dt { "Title" } dd { (announcement.title) }
                 dt { "Body" } dd { (announcement.body) }
-                dt { "Author" } dd { (announcement.author) }
+                dt { "Author id" } dd { (announcement.author_id) }
             }
             p {
                 a href={ "/announcements/" (announcement.id) "/edit" } { "Edit" }
@@ -95,17 +95,17 @@ pub fn show(announcement: &Announcement) -> Markup {
 }
 
 pub fn edit(announcement: &Announcement, draft: Option<&Draft>) -> Markup {
-    let (title, body, author) = draft.map_or(
+    let (title, body, author_id) = draft.map_or(
         (
             announcement.title.as_str(),
             announcement.body.as_str(),
-            announcement.author.as_str(),
+            announcement.author_id,
         ),
         |d| {
             (
                 d.input.title.as_str(),
                 d.input.body.as_str(),
-                d.input.author.as_str(),
+                d.input.author_id,
             )
         },
     );
@@ -115,7 +115,7 @@ pub fn edit(announcement: &Announcement, draft: Option<&Draft>) -> Markup {
         &html! {
             (error_message(draft))
             form method="post" action={ "/announcements/" (announcement.id) } {
-                (announcement_fields(title, body, author))
+                (announcement_fields(title, body, author_id))
                 button type="submit" { "Save" }
             }
             p { a href={ "/announcements/" (announcement.id) } { "Cancel" } }

@@ -26,8 +26,8 @@ services:
       mongoimport --host mongo --db alumni --collection alumni
       --drop --jsonArray --file /seed/alumni.json &&
       mongosh --host mongo --quiet alumni --eval
-      "db.counters.updateOne({_id: \"alumni\"}, {$$set: {seq: 3}}, {upsert: true});
-       db.counters.updateOne({_id: \"announcements\"}, {$$set: {seq: 0}}, {upsert: true})"'
+      "db.counters.replaceOne({_id: \"alumni\"}, {seq: 3}, {upsert: true});
+       db.counters.replaceOne({_id: \"announcements\"}, {seq: 0}, {upsert: true})"'
 
   alumni-api:
     build: ./services/alumni-api
@@ -41,6 +41,8 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      mongo-seed:
+        condition: service_completed_successfully
 
   frontend:
     build: ./frontend

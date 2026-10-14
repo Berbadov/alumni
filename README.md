@@ -87,27 +87,28 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 
 | Layer | Part | File or container |
 | --- | --- | --- |
-| Model | Data shapes `Alumni`, `User`, `CreateUser`, `UpdateUser` | `services/alumni-api/src/models.rs` |
-| Model | MongoDB collection handle | `AppState` in `main.rs` |
-| Model | In-memory user store `UserStore` with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/user_store.rs` |
-| Model | Data rules: `validate_name`, `validate_email` and the `UserError` type | `services/alumni-api/src/user_store.rs` |
+| Model | Data shapes `Alumni`, `CreateAlumni`, `UpdateAlumni`, `Announcement`, `CreateAnnouncement`, `UpdateAnnouncement` | `services/alumni-api/src/models.rs` |
+| Model | MongoDB stores with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/alumni_store.rs`, `services/alumni-api/src/announcement_store.rs` |
+| Model | Atomic id counters (`alumni`, `announcements`) | `counters` collection, used inside the stores |
+| Model | Data rules: name, email, year, degree, title, body checks and the `ModelError` type | `services/alumni-api/src/models.rs` |
 | Model | Database settings and bind address | `services/alumni-api/src/config.rs` |
 | Model | Sample data and import | `seed/alumni.json`, `mongo-seed` container |
 | Model | Database | `mongo` container |
-| Controller | Route functions for health, hello, sum and alumni | `services/alumni-api/src/handlers.rs` |
-| Controller | `UserController`: functions for the user pages (list, create, show, edit, update, delete) | `services/alumni-api/src/controllers/user_controller.rs` |
-| Controller | `ApiUserController`: functions for the user JSON CRUD | `services/alumni-api/src/controllers/api_user_controller.rs` |
-| Controller | Route tables: `user.rs` (pages) and `api_user.rs` (JSON) | `services/alumni-api/src/routes/` |
+| Controller | Route functions for health, hello and sum | `services/alumni-api/src/handlers.rs` |
+| Controller | `ApiAlumniController`: functions for the alumni JSON CRUD | `services/alumni-api/src/controllers/api_alumni_controller.rs` |
+| Controller | `AnnouncementController`: functions for the announcement pages (list, create, show, edit, update, delete) | `services/alumni-api/src/controllers/announcement_controller.rs` |
+| Controller | `ApiAnnouncementController`: functions for the announcement JSON CRUD | `services/alumni-api/src/controllers/api_announcement_controller.rs` |
+| Controller | Route tables: `api_alumni.rs` (JSON), `announcement.rs` (pages) and `api_announcement.rs` (JSON) | `services/alumni-api/src/routes/` |
 | Controller | Error type and HTTP status mapping `ApiError` | `services/alumni-api/src/error.rs` |
-| Controller | Start of the route tables, `/api/v1` scope, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
-| View | HTML pages for users (maud templates) | `services/alumni-api/src/views/` |
+| Controller | Stores, `/api/v1` scope, indexes, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
+| View | HTML pages for announcements (maud templates) | `services/alumni-api/src/views/` |
 | View | JSON responses that the API returns | Serde derive on the Model structs |
 
 ### Frontend mapping (planned)
 
 | Layer | Part | Planned location |
 | --- | --- | --- |
-| Model | `Alumni` and `User` structs | `crates/alumni-model/` |
+| Model | `Alumni` and `Announcement` structs | `crates/alumni-model/` |
 | Controller | Functions and signals that call the API and hold the page state | `frontend/src/controllers/` |
 | Controller | Route table | `frontend/src/app.rs` |
 | View | Page components | `frontend/src/pages/` |
@@ -120,19 +121,17 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 - A View must not call the API. It must call a controller.
 - A controller must not hold data rules. It must call the Model.
 - The Model must not know about HTTP, routes or pages.
-- The backend and the frontend must import `Alumni` and `User` from `alumni-model`. Do not copy them.
+- The backend and the frontend must import `Alumni` from `alumni-model`. Do not copy it.
 
 ### Known gaps
 
-- `list_alumni` in `handlers.rs` queries MongoDB directly. No separate Model function exists.
-- Two data sources exist: MongoDB for alumni, and memory for users. The user data resets on restart.
-  See `docs/trade-offs.md`.
 - The `alumni-model` crate and the `crates/` folder are not in the repository yet. `AGENTS.md`
   must list the `crates/` folder when you add it.
 - Docker builds for `alumni-api` and the frontend must use the repository root as build context
   to read the shared crate.
-- `docs/ddd.md` defines the target database design. It merges users into alumni
-  and adds `counters` and timestamps. The code does not use it yet.
+- Filter queries scan: no indexes exist on `graduation_year`, `degree`, or `full_name` yet.
+- `cargo test` needs MongoDB on `localhost:27017` (or sets `MONGO_URI`).
+- `docs/ddd.md` defines the target database design. The code follows it.
 
 ## Run
 
@@ -163,37 +162,54 @@ The API has these routes under `/api/v1`. Use port 8080 for the API or port 80 f
 | `GET /api/v1/hello/{variable}` | `"hello, {variable}!"` |
 | `GET /api/v1/sum/{num1}/{num2}` | `num1 + num2` as a bare JSON number (f64) |
 
-`ApiUserController` serves the user JSON routes under `/api/v1/users`. The same routes also work
-under `/api/users`. The user store is in memory and resets on restart. See `docs/trade-offs.md`.
+`ApiAlumniController` serves the alumni JSON routes under `/api/v1/alumni`.
+All data lives in MongoDB. A duplicate email fails with status 400. Delete of
+an alumni record with announcements fails with status 400.
+See `docs/trade-offs.md`.
 
 | Route | Returns |
 | --- | --- |
-| `POST /api/v1/users` | The new user (status 201). Fields: `name`, `email` |
-| `GET /api/v1/users` | All users, ordered by id |
-| `GET /api/v1/users/{id}` | One user, or status 404 |
-| `PUT /api/v1/users/{id}` | Full replacement, or status 404 |
-| `PATCH /api/v1/users/{id}` | Partial update, or status 404 |
-| `DELETE /api/v1/users/{id}` | Status 204, or status 404 |
+| `POST /api/v1/alumni` | The new alumni record (status 201). Fields: `full_name`, `email`, `graduation_year`, `degree` |
+| `GET /api/v1/alumni` | All alumni records, ordered by id |
+| `GET /api/v1/alumni/{id}` | One alumni record, or status 404 |
+| `PUT /api/v1/alumni/{id}` | Full replacement, or status 404 |
+| `PATCH /api/v1/alumni/{id}` | Partial update, or status 404 |
+| `DELETE /api/v1/alumni/{id}` | Status 204, 400, or 404 |
 | `GET /api/health` | `{"status": "ok"}` |
 | `GET /api/swagger` | Swagger UI (redirects to `/api/swagger/`) |
 
-`UserController` serves the user pages as HTML. An HTML form sends only GET and POST. For this
+`ApiAnnouncementController` serves the announcement JSON routes under
+`/api/v1/announcements`. The same routes also work under `/api/announcements`.
+Each announcement links to an alumni record through `author_id`. An unknown
+`author_id` fails with status 400.
+
+| Route | Returns |
+| --- | --- |
+| `POST /api/v1/announcements` | The new announcement (status 201). Fields: `title`, `body`, `author_id` |
+| `GET /api/v1/announcements` | All announcements, ordered by id |
+| `GET /api/v1/announcements/{id}` | One announcement, or status 404 |
+| `PUT /api/v1/announcements/{id}` | Full replacement, or status 404 |
+| `PATCH /api/v1/announcements/{id}` | Partial update, or status 404 |
+| `DELETE /api/v1/announcements/{id}` | Status 204, or status 404 |
+
+`AnnouncementController` serves the announcement pages as HTML. An HTML form sends only GET and POST. For this
 reason, update and delete are POST routes. After a successful change, the page redirects
-(status 303). If the input is not valid, the page shows the error with status 400. If the user
+(status 303). If the input is not valid, the page shows the error with status 400. If the announcement
 does not exist, the page shows an HTML 404 page.
 
 | Route | Returns |
 | --- | --- |
-| `GET /users` | The user list and the create form |
-| `POST /users` | Creates a user from the form fields `name` and `email` |
-| `GET /users/{id}` | The page for one user |
-| `GET /users/{id}/edit` | The edit form for one user |
-| `POST /users/{id}` | Replaces `name` and `email` of one user |
-| `POST /users/{id}/delete` | Deletes one user |
+| `GET /announcements` | The announcement list and the create form |
+| `POST /announcements` | Creates an announcement from the form fields `title`, `body` and `author_id` |
+| `GET /announcements/{id}` | The page for one announcement |
+| `GET /announcements/{id}/edit` | The edit form for one announcement |
+| `POST /announcements/{id}` | Replaces `title`, `body` and `author_id` of one announcement |
+| `POST /announcements/{id}/delete` | Deletes one announcement |
 
-The Swagger UI shows all user routes, grouped by the tags `UserController` and
-`ApiUserController`: http://localhost:8080/api/swagger. The gateway also serves it at
-http://localhost/api/swagger. The gateway proxies `/users` to the API.
+The Swagger UI shows all routes, grouped by the tags `ApiAlumniController`,
+`AnnouncementController` and `ApiAnnouncementController`:
+http://localhost:8080/api/swagger. The gateway also serves it at
+http://localhost/api/swagger. The gateway proxies `/announcements` to the API.
 
 The gateway on port 80 proxies these short routes to the API: `/hello`, `/hello/{variable}` and
 `/sum/{num1}/{num2}`. They return the same responses as the routes without the `/api/v1` prefix.

@@ -2,6 +2,30 @@
 
 Completed work log, newest first.
 
+## 2026-10-14 — MongoDB migration per `docs/ddd.md`
+- `users` merges into `alumni`. `UserStore`, `UserController`,
+  `ApiUserController`, the `/users` pages, and the `/api/v1/users` plus
+  `/api/users` routes are gone. The gateway `/users` proxy is gone too.
+- `alumni-api`: `AlumniStore` and `AnnouncementStore` run on MongoDB with
+  atomic `counters` (`findOneAndUpdate` with `$inc`, upsert). Ids start at 1.
+  Seed rows are `1/2/3` with BSON dates and int types.
+- `ApiAlumniController`: JSON CRUD under `/api/v1/alumni` only. Duplicate
+  email fails with 400. Delete of alumni with announcements fails with 400.
+- `Announcement.author_id` replaces the free-text `author`. Unknown author
+  fails with 400. HTML forms take `author_id`.
+- Data rules stay in the Model (`models.rs` pure functions plus unit tests).
+  Timestamps are RFC3339 strings in JSON and BSON dates in storage.
+- Startup creates the unique `alumni.email` index and the
+  `announcements.author_id` index. Compose starts the API after `mongo-seed`
+  finishes: the first boot built the index while `--drop` ran and MongoDB
+  aborted the build.
+- Tests: 24 pass. `cargo test` needs MongoDB on `localhost:27017` (or sets
+  `MONGO_URI`). Each test uses its own database and drops it after. Clippy
+  shows zero warnings.
+- Verified in Docker: seed import plus counters, full alumni and announcement
+  CRUD, block delete, old user routes return 404, gateway on :80 serves the
+  frontend with numeric alumni ids.
+
 ## 2026-10-07 — Announcements: model, controllers, routes, web CRUD
 - `alumni-api`: new `Announcement` model (`id`, `title`, `body`, `author`) with
   `CreateAnnouncement` / `UpdateAnnouncement` DTOs in `models.rs`, and an in-memory

@@ -1,12 +1,6 @@
 use actix_web::{get, web, web::Json, HttpResponse};
-use futures_util::TryStreamExt;
-use mongodb::bson::doc;
 use serde::Serialize;
 use utoipa::ToSchema;
-
-use crate::error::ApiError;
-use crate::models::Alumni;
-use crate::AppState;
 
 #[derive(Serialize, ToSchema)]
 pub struct Health {
@@ -49,14 +43,4 @@ pub async fn hello_name(path: web::Path<String>) -> Json<String> {
 pub async fn sum(path: web::Path<(f64, f64)>) -> Json<f64> {
     let (num1, num2) = path.into_inner();
     Json(num1 + num2)
-}
-
-#[get("/alumni")]
-pub async fn list_alumni(state: web::Data<AppState>) -> Result<Json<Vec<Alumni>>, ApiError> {
-    let mut cursor = state.collection.find(doc! {}).await?;
-    let mut alumni = Vec::new();
-    while let Some(doc) = cursor.try_next().await? {
-        alumni.push(doc);
-    }
-    Ok(Json(alumni))
 }

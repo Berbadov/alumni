@@ -1,6 +1,6 @@
 # Database Design Document (DDD)
 
-Status: target design. The code does not follow this document yet.
+Status: implemented. The code follows this document.
 Today `alumni` lives in MongoDB, `users` and `announcements` live in memory.
 See `services/alumni-api/src/main.rs` and `docs/trade-offs.md`.
 Implement this document to finish backlog item

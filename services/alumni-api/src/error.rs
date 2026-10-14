@@ -1,13 +1,10 @@
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
 use thiserror::Error;
 
-use crate::announcement_store::AnnouncementError;
-use crate::user_store::UserError;
+use crate::models::ModelError;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
-    #[error("database error: {0}")]
-    Mongo(#[from] mongodb::error::Error),
     #[error("not found")]
     NotFound,
     #[error("{0}")]
@@ -16,22 +13,15 @@ pub enum ApiError {
     Internal(String),
 }
 
-impl From<UserError> for ApiError {
-    fn from(err: UserError) -> Self {
+impl From<ModelError> for ApiError {
+    fn from(err: ModelError) -> Self {
         match err {
-            UserError::Invalid(msg) => ApiError::BadRequest(msg.to_owned()),
-            UserError::NotFound => ApiError::NotFound,
-            UserError::Poisoned => ApiError::Internal(err.to_string()),
-        }
-    }
-}
-
-impl From<AnnouncementError> for ApiError {
-    fn from(err: AnnouncementError) -> Self {
-        match err {
-            AnnouncementError::Invalid(msg) => ApiError::BadRequest(msg.to_owned()),
-            AnnouncementError::NotFound => ApiError::NotFound,
-            AnnouncementError::Poisoned => ApiError::Internal(err.to_string()),
+            ModelError::Invalid(msg) | ModelError::Blocked(msg) => {
+                Self::BadRequest(msg.to_owned())
+            }
+            ModelError::NotFound => Self::NotFound,
+            ModelError::Duplicate => Self::BadRequest("email already exists".to_owned()),
+            ModelError::Internal(msg) => Self::Internal(msg),
         }
     }
 }
@@ -39,7 +29,7 @@ impl From<AnnouncementError> for ApiError {
 impl ResponseError for ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
-            ApiError::Mongo(_) | ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
         }

@@ -1,445 +1,446 @@
 pub mod announcement;
+pub mod api_alumni;
 pub mod api_announcement;
-pub mod api_user;
-pub mod user;
 
 use actix_web::web;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.configure(user::configure)
-        .configure(api_user::configure)
+    cfg.configure(api_alumni::configure)
         .configure(announcement::configure)
         .configure(api_announcement::configure);
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use actix_web::dev::ServiceResponse;
     use actix_web::http::StatusCode;
     use actix_web::http::header::{CONTENT_TYPE, ContentType, LOCATION};
     use actix_web::test::{self, TestRequest};
     use actix_web::{App, web};
+    use mongodb::bson::{Document, doc};
+    use mongodb::options::{ClientOptions, IndexOptions};
+    use mongodb::{Client, IndexModel};
     use serde_json::json;
 
     use super::configure;
+    use crate::alumni_store::AlumniStore;
     use crate::announcement_store::AnnouncementStore;
-    use crate::models::{Announcement, User};
-    use crate::user_store::UserStore;
+    use crate::models::{Alumni, Announcement};
+    use crate::AppState;
 
-    macro_rules! test_app {
-        () => {
-            test::init_service(
-                App::new()
-                    .app_data(web::Data::new(UserStore::default()))
-                    .app_data(web::Data::new(AnnouncementStore::default()))
-                    .configure(configure),
+    static TEST_DB_COUNT: AtomicU64 = AtomicU64::new(0);
+
+    fn test_uri() -> String {
+        std::env::var("MONGO_URI").unwrap_or_else(|_| "mongodb://localhost:27017".to_owned())
+    }
+
+    async fn test_client() -> Client {
+        let options = ClientOptions::parse(test_uri()).await.unwrap();
+        Client::with_options(options).unwrap()
+    }
+
+    async fn test_state() -> (AppState, String) {
+        let n = TEST_DB_COUNT.fetch_add(1, Ordering::Relaxed);
+        let name = format!("alumni_test_{}_{}", std::process::id(), n);
+        let db = test_client().await.database(&name);
+        db.collection::<Document>("alumni")
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "email": 1 })
+                    .options(IndexOptions::builder().unique(true).build())
+                    .build(),
             )
             .await
+            .unwrap();
+        db.collection::<Document>("announcements")
+            .create_index(IndexModel::builder().keys(doc! { "author_id": 1 }).build())
+            .await
+            .unwrap();
+        (
+            AppState {
+                alumni: AlumniStore::new(&db),
+                announcements: AnnouncementStore::new(&db),
+            },
+            name,
+        )
+    }
+
+    async fn cleanup(name: &str) {
+        test_client().await.database(name).drop().await.unwrap();
+    }
+
+    macro_rules! test_app {
+        () => {{
+            let (state, db_name) = test_state().await;
+            let app = test::init_service(
+                App::new()
+                    .app_data(web::Data::new(state))
+                    .configure(configure),
+            )
+            .await;
+            (app, db_name)
+        }};
+    }
+
+    fn alumni_json(name: &str, email: &str) -> serde_json::Value {
+        json!({
+            "full_name": name,
+            "email": email,
+            "graduation_year": 2027,
+            "degree": "Web Development",
+        })
+    }
+
+    macro_rules! seed_alumni {
+        ($app:expr) => {
+            let req = TestRequest::post()
+                .uri("/api/v1/alumni")
+                .set_json(alumni_json("Ada Lovelace", "ada@example.com"))
+                .to_request();
+            assert_eq!(
+                test::call_service(&$app, req).await.status(),
+                StatusCode::CREATED
+            );
         };
     }
 
-    macro_rules! api_tests {
-        ($module:ident, $base:literal) => {
-            mod $module {
-                use super::*;
-
-                #[actix_web::test]
-                async fn create_get_patch_put_delete_lifecycle() {
-                    let app = test_app!();
-                    let base = $base;
-
-                    let req = TestRequest::post()
-                        .uri(base)
-                        .set_json(json!({ "name": "  Ada Lovelace  ", "email": "Ada@Example.com" }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::CREATED);
-                    let created: User = test::read_body_json(resp).await;
-                    assert_eq!(created.id, 1);
-                    assert_eq!(created.name, "Ada Lovelace");
-                    assert_eq!(created.email, "ada@example.com");
-
-                    let uri = format!("{base}/1");
-                    let user: User = test::call_and_read_body_json(
-                        &app,
-                        TestRequest::get().uri(&uri).to_request(),
-                    )
-                    .await;
-                    assert_eq!(user.name, "Ada Lovelace");
-
-                    let req = TestRequest::patch()
-                        .uri(&uri)
-                        .set_json(json!({ "name": "Ada King" }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::OK);
-                    let patched: User = test::read_body_json(resp).await;
-                    assert_eq!(patched.name, "Ada King");
-                    assert_eq!(patched.email, "ada@example.com");
-
-                    let req = TestRequest::put()
-                        .uri(&uri)
-                        .set_json(json!({ "name": "Ada", "email": "ada@math.org" }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::OK);
-                    let replaced: User = test::read_body_json(resp).await;
-                    assert_eq!(replaced.name, "Ada");
-                    assert_eq!(replaced.email, "ada@math.org");
-
-                    let resp =
-                        test::call_service(&app, TestRequest::delete().uri(&uri).to_request()).await;
-                    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-                    let resp =
-                        test::call_service(&app, TestRequest::get().uri(&uri).to_request()).await;
-                    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-                }
-
-                #[actix_web::test]
-                async fn list_returns_all_in_id_order() {
-                    let app = test_app!();
-                    let base = $base;
-
-                    for name in ["first", "second"] {
-                        let req = TestRequest::post()
-                            .uri(base)
-                            .set_json(json!({ "name": name, "email": format!("{name}@example.com") }))
-                            .to_request();
-                        let resp = test::call_service(&app, req).await;
-                        assert_eq!(resp.status(), StatusCode::CREATED);
-                    }
-
-                    let users: Vec<User> = test::call_and_read_body_json(
-                        &app,
-                        TestRequest::get().uri(base).to_request(),
-                    )
-                    .await;
-                    assert_eq!(users.len(), 2);
-                    assert_eq!(users[0].name, "first");
-                    assert_eq!(users[1].name, "second");
-                }
-
-                #[actix_web::test]
-                async fn rejects_invalid_input() {
-                    let app = test_app!();
-                    let base = $base;
-
-                    for body in [
-                        json!({ "name": "", "email": "a@example.com" }),
-                        json!({ "name": "Ada", "email": "not-an-email" }),
-                        json!({ "name": "Ada", "email": "@example.com" }),
-                    ] {
-                        let req = TestRequest::post().uri(base).set_json(&body).to_request();
-                        let resp = test::call_service(&app, req).await;
-                        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-                    }
-
-                    let req = TestRequest::patch()
-                        .uri(&format!("{base}/999"))
-                        .set_json(json!({ "name": "Ghost" }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-                }
-            }
+    macro_rules! seed_announcement {
+        ($app:expr) => {
+            seed_alumni!($app);
+            let req = TestRequest::post()
+                .uri("/api/v1/announcements")
+                .set_json(json!({ "title": "Reunion", "body": "Save the date", "author_id": 1 }))
+                .to_request();
+            assert_eq!(
+                test::call_service(&$app, req).await.status(),
+                StatusCode::CREATED
+            );
         };
     }
 
-    api_tests!(versioned, "/api/v1/users");
-    api_tests!(unversioned, "/api/users");
+    #[actix_web::test]
+    async fn alumni_create_get_patch_put_delete_lifecycle() {
+        let (app, db) = test_app!();
+
+        let req = TestRequest::post()
+            .uri("/api/v1/alumni")
+            .set_json(alumni_json("  Ada Lovelace  ", "Ada@Example.com"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created: Alumni = test::read_body_json(resp).await;
+        assert_eq!(created.id, 1);
+        assert_eq!(created.full_name, "Ada Lovelace");
+        assert_eq!(created.email, "ada@example.com");
+        assert_eq!(created.graduation_year, 2027);
+
+        let uri = "/api/v1/alumni/1";
+        let alumni: Alumni =
+            test::call_and_read_body_json(&app, TestRequest::get().uri(uri).to_request()).await;
+        assert_eq!(alumni.full_name, "Ada Lovelace");
+
+        let req = TestRequest::patch()
+            .uri(uri)
+            .set_json(json!({ "full_name": "Ada King" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let patched: Alumni = test::read_body_json(resp).await;
+        assert_eq!(patched.full_name, "Ada King");
+        assert_eq!(patched.email, "ada@example.com");
+
+        let req = TestRequest::put()
+            .uri(uri)
+            .set_json(alumni_json("Ada", "ada@math.org"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let replaced: Alumni = test::read_body_json(resp).await;
+        assert_eq!(replaced.full_name, "Ada");
+        assert_eq!(replaced.email, "ada@math.org");
+
+        let resp =
+            test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        let resp = test::call_service(&app, TestRequest::get().uri(uri).to_request()).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn alumni_list_returns_all_in_id_order() {
+        let (app, db) = test_app!();
+
+        for (name, email) in [("first", "first@example.com"), ("second", "second@example.com")] {
+            let req = TestRequest::post()
+                .uri("/api/v1/alumni")
+                .set_json(alumni_json(name, email))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::CREATED);
+        }
+
+        let alumni: Vec<Alumni> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri("/api/v1/alumni").to_request(),
+        )
+        .await;
+        assert_eq!(alumni.len(), 2);
+        assert_eq!(alumni[0].full_name, "first");
+        assert_eq!(alumni[1].full_name, "second");
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn alumni_rejects_invalid_input() {
+        let (app, db) = test_app!();
+
+        for body in [
+            alumni_json("", "a@example.com"),
+            alumni_json("Ada", "not-an-email"),
+            alumni_json("Ada", "@example.com"),
+            json!({
+                "full_name": "Ada",
+                "email": "ada@example.com",
+                "graduation_year": 1800,
+                "degree": "Web Development",
+            }),
+            json!({
+                "full_name": "Ada",
+                "email": "ada@example.com",
+                "graduation_year": 2027,
+                "degree": "",
+            }),
+        ] {
+            let req = TestRequest::post()
+                .uri("/api/v1/alumni")
+                .set_json(&body)
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        }
+
+        let req = TestRequest::patch()
+            .uri("/api/v1/alumni/999")
+            .set_json(json!({ "full_name": "Ghost" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn alumni_rejects_duplicate_email() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        let req = TestRequest::post()
+            .uri("/api/v1/alumni")
+            .set_json(alumni_json("Ada Clone", "ADA@example.com"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn alumni_delete_with_announcements_fails_until_they_go() {
+        let (app, db) = test_app!();
+        seed_announcement!(app);
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete()
+                .uri("/api/v1/announcements/1")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn announcement_create_get_patch_put_delete_lifecycle() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        let req = TestRequest::post()
+            .uri("/api/v1/announcements")
+            .set_json(json!({ "title": "  Reunion  ", "body": "  Save the date  ", "author_id": 1 }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created: Announcement = test::read_body_json(resp).await;
+        assert_eq!(created.id, 1);
+        assert_eq!(created.title, "Reunion");
+        assert_eq!(created.body, "Save the date");
+        assert_eq!(created.author_id, 1);
+
+        let uri = "/api/v1/announcements/1";
+        let announcement: Announcement = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri(uri).to_request(),
+        )
+        .await;
+        assert_eq!(announcement.title, "Reunion");
+
+        let req = TestRequest::patch()
+            .uri(uri)
+            .set_json(json!({ "title": "Picnic" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let patched: Announcement = test::read_body_json(resp).await;
+        assert_eq!(patched.title, "Picnic");
+        assert_eq!(patched.body, "Save the date");
+
+        let req = TestRequest::put()
+            .uri(uri)
+            .set_json(json!({ "title": "Fair", "body": "New body", "author_id": 1 }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let replaced: Announcement = test::read_body_json(resp).await;
+        assert_eq!(replaced.title, "Fair");
+        assert_eq!(replaced.author_id, 1);
+
+        let resp = test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        let resp = test::call_service(&app, TestRequest::get().uri(uri).to_request()).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn announcement_list_returns_all_in_id_order() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        for title in ["first", "second"] {
+            let req = TestRequest::post()
+                .uri("/api/v1/announcements")
+                .set_json(json!({ "title": title, "body": "body", "author_id": 1 }))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::CREATED);
+        }
+
+        let announcements: Vec<Announcement> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri("/api/v1/announcements").to_request(),
+        )
+        .await;
+        assert_eq!(announcements.len(), 2);
+        assert_eq!(announcements[0].title, "first");
+        assert_eq!(announcements[1].title, "second");
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn announcement_rejects_invalid_input() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        for body in [
+            json!({ "title": "", "body": "body", "author_id": 1 }),
+            json!({ "title": "Title", "body": "", "author_id": 1 }),
+            json!({ "title": "Title", "body": "body", "author_id": 999 }),
+        ] {
+            let req = TestRequest::post()
+                .uri("/api/v1/announcements")
+                .set_json(&body)
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        }
+
+        let req = TestRequest::patch()
+            .uri("/api/v1/announcements/999")
+            .set_json(json!({ "title": "Ghost" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn announcement_alias_serves_the_same_store() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        let req = TestRequest::post()
+            .uri("/api/announcements")
+            .set_json(json!({ "title": "Alias", "body": "body", "author_id": 1 }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let announcements: Vec<Announcement> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/announcements")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(announcements.len(), 1);
+
+        cleanup(&db).await;
+    }
 
     async fn body_text(resp: ServiceResponse) -> String {
         String::from_utf8(test::read_body(resp).await.to_vec()).unwrap()
     }
 
     #[actix_web::test]
-    async fn users_page_lists_users_and_escapes_html() {
-        let app = test_app!();
+    async fn announcements_page_lists_and_escapes_html() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
         let req = TestRequest::post()
-            .uri("/api/v1/users")
-            .set_json(json!({ "name": "<b>Ada</b>", "email": "ada@example.com" }))
+            .uri("/api/v1/announcements")
+            .set_json(json!({ "title": "<b>Reunion</b>", "body": "Save the date", "author_id": 1 }))
             .to_request();
         assert_eq!(
             test::call_service(&app, req).await.status(),
             StatusCode::CREATED
         );
 
-        let resp = test::call_service(&app, TestRequest::get().uri("/users").to_request()).await;
+        let resp =
+            test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
         assert_eq!(resp.status(), StatusCode::OK);
         let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
         assert!(content_type.starts_with("text/html"));
         let body = body_text(resp).await;
-        assert!(body.contains("&lt;b&gt;Ada&lt;/b&gt;"));
-        assert!(!body.contains("<b>Ada</b>"));
+        assert!(body.contains("&lt;b&gt;Reunion&lt;/b&gt;"));
+        assert!(!body.contains("<b>Reunion</b>"));
+
+        cleanup(&db).await;
     }
-
-    #[actix_web::test]
-    async fn form_post_creates_user_and_redirects() {
-        let app = test_app!();
-        let req = TestRequest::post()
-            .uri("/users")
-            .insert_header(ContentType::form_url_encoded())
-            .set_payload("name=Ada+Lovelace&email=ada%40example.com")
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/users");
-
-        let user: User = test::call_and_read_body_json(
-            &app,
-            TestRequest::get().uri("/api/v1/users/1").to_request(),
-        )
-        .await;
-        assert_eq!(user.name, "Ada Lovelace");
-    }
-
-    #[actix_web::test]
-    async fn form_post_with_invalid_input_shows_the_error() {
-        let app = test_app!();
-        let req = TestRequest::post()
-            .uri("/users")
-            .insert_header(ContentType::form_url_encoded())
-            .set_payload("name=&email=ada%40example.com")
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        let body = body_text(resp).await;
-        assert!(body.contains("name must not be empty"));
-        assert!(body.contains(r#"value="ada@example.com""#));
-    }
-
-    fn form_post(uri: &str, payload: &str) -> TestRequest {
-        TestRequest::post()
-            .uri(uri)
-            .insert_header(ContentType::form_url_encoded())
-            .set_payload(payload.to_owned())
-    }
-
-    macro_rules! seed_ada {
-        ($app:expr) => {
-            let req = TestRequest::post()
-                .uri("/api/v1/users")
-                .set_json(json!({ "name": "Ada", "email": "ada@example.com" }))
-                .to_request();
-            assert_eq!(test::call_service(&$app, req).await.status(), StatusCode::CREATED);
-        };
-    }
-
-    #[actix_web::test]
-    async fn index_page_links_each_user_to_show_edit_and_delete() {
-        let app = test_app!();
-        seed_ada!(app);
-
-        let resp = test::call_service(&app, TestRequest::get().uri("/users").to_request()).await;
-        let body = body_text(resp).await;
-        assert!(body.contains(r#"href="/users/1""#));
-        assert!(body.contains(r#"href="/users/1/edit""#));
-        assert!(body.contains(r#"action="/users/1/delete""#));
-    }
-
-    #[actix_web::test]
-    async fn show_and_edit_pages_render_the_user() {
-        let app = test_app!();
-        seed_ada!(app);
-
-        let resp = test::call_service(&app, TestRequest::get().uri("/users/1").to_request()).await;
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = body_text(resp).await;
-        assert!(body.contains("ada@example.com"));
-        assert!(body.contains(r#"href="/users/1/edit""#));
-
-        let resp =
-            test::call_service(&app, TestRequest::get().uri("/users/1/edit").to_request()).await;
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = body_text(resp).await;
-        assert!(body.contains(r#"value="Ada""#));
-        assert!(body.contains(r#"action="/users/1""#));
-    }
-
-    #[actix_web::test]
-    async fn form_post_updates_user_and_redirects() {
-        let app = test_app!();
-        seed_ada!(app);
-
-        let resp = test::call_service(
-            &app,
-            form_post("/users/1", "name=Ada+King&email=king%40example.com").to_request(),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/users/1");
-
-        let user: User = test::call_and_read_body_json(
-            &app,
-            TestRequest::get().uri("/api/v1/users/1").to_request(),
-        )
-        .await;
-        assert_eq!(
-            (user.name.as_str(), user.email.as_str()),
-            ("Ada King", "king@example.com")
-        );
-    }
-
-    #[actix_web::test]
-    async fn form_post_update_with_invalid_input_shows_the_edit_page_with_error() {
-        let app = test_app!();
-        seed_ada!(app);
-
-        let resp = test::call_service(
-            &app,
-            form_post("/users/1", "name=&email=king%40example.com").to_request(),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        let body = body_text(resp).await;
-        assert!(body.contains("name must not be empty"));
-        assert!(body.contains(r#"value="king@example.com""#));
-    }
-
-    #[actix_web::test]
-    async fn form_post_deletes_user_and_redirects() {
-        let app = test_app!();
-        seed_ada!(app);
-
-        let resp = test::call_service(&app, form_post("/users/1/delete", "").to_request()).await;
-        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
-        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/users");
-
-        let resp =
-            test::call_service(&app, TestRequest::get().uri("/api/v1/users/1").to_request()).await;
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[actix_web::test]
-    async fn missing_user_renders_an_html_404_page() {
-        let app = test_app!();
-
-        let requests = [
-            TestRequest::get().uri("/users/99").to_request(),
-            TestRequest::get().uri("/users/99/edit").to_request(),
-            form_post("/users/99", "name=Ada&email=ada%40example.com").to_request(),
-            form_post("/users/99/delete", "").to_request(),
-        ];
-        for req in requests {
-            let resp = test::call_service(&app, req).await;
-            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-            let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
-            assert!(content_type.starts_with("text/html"));
-        }
-    }
-
-    macro_rules! announcement_api_tests {
-        ($module:ident, $base:literal) => {
-            mod $module {
-                use super::*;
-
-                #[actix_web::test]
-                async fn create_get_patch_put_delete_lifecycle() {
-                    let app = test_app!();
-                    let base = $base;
-
-                    let req = TestRequest::post()
-                        .uri(base)
-                        .set_json(json!({ "title": "  Reunion  ", "body": "  Save the date  ", "author": " Ada " }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::CREATED);
-                    let created: Announcement = test::read_body_json(resp).await;
-                    assert_eq!(created.id, 1);
-                    assert_eq!(created.title, "Reunion");
-                    assert_eq!(created.body, "Save the date");
-                    assert_eq!(created.author, "Ada");
-
-                    let uri = format!("{base}/1");
-                    let announcement: Announcement = test::call_and_read_body_json(
-                        &app,
-                        TestRequest::get().uri(&uri).to_request(),
-                    )
-                    .await;
-                    assert_eq!(announcement.title, "Reunion");
-
-                    let req = TestRequest::patch()
-                        .uri(&uri)
-                        .set_json(json!({ "title": "Picnic" }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::OK);
-                    let patched: Announcement = test::read_body_json(resp).await;
-                    assert_eq!(patched.title, "Picnic");
-                    assert_eq!(patched.body, "Save the date");
-
-                    let req = TestRequest::put()
-                        .uri(&uri)
-                        .set_json(json!({ "title": "Fair", "body": "New body", "author": "Grace" }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::OK);
-                    let replaced: Announcement = test::read_body_json(resp).await;
-                    assert_eq!(replaced.title, "Fair");
-                    assert_eq!(replaced.author, "Grace");
-
-                    let resp =
-                        test::call_service(&app, TestRequest::delete().uri(&uri).to_request()).await;
-                    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
-
-                    let resp =
-                        test::call_service(&app, TestRequest::get().uri(&uri).to_request()).await;
-                    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-                }
-
-                #[actix_web::test]
-                async fn list_returns_all_in_id_order() {
-                    let app = test_app!();
-                    let base = $base;
-
-                    for title in ["first", "second"] {
-                        let req = TestRequest::post()
-                            .uri(base)
-                            .set_json(json!({ "title": title, "body": "body", "author": "Ada" }))
-                            .to_request();
-                        let resp = test::call_service(&app, req).await;
-                        assert_eq!(resp.status(), StatusCode::CREATED);
-                    }
-
-                    let announcements: Vec<Announcement> = test::call_and_read_body_json(
-                        &app,
-                        TestRequest::get().uri(base).to_request(),
-                    )
-                    .await;
-                    assert_eq!(announcements.len(), 2);
-                    assert_eq!(announcements[0].title, "first");
-                    assert_eq!(announcements[1].title, "second");
-                }
-
-                #[actix_web::test]
-                async fn rejects_invalid_input() {
-                    let app = test_app!();
-                    let base = $base;
-
-                    for body in [
-                        json!({ "title": "", "body": "body", "author": "Ada" }),
-                        json!({ "title": "Title", "body": "", "author": "Ada" }),
-                        json!({ "title": "Title", "body": "body", "author": "" }),
-                    ] {
-                        let req = TestRequest::post().uri(base).set_json(&body).to_request();
-                        let resp = test::call_service(&app, req).await;
-                        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-                    }
-
-                    let req = TestRequest::patch()
-                        .uri(&format!("{base}/999"))
-                        .set_json(json!({ "title": "Ghost" }))
-                        .to_request();
-                    let resp = test::call_service(&app, req).await;
-                    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-                }
-            }
-        };
-    }
-
-    announcement_api_tests!(announcement_versioned, "/api/v1/announcements");
-    announcement_api_tests!(announcement_unversioned, "/api/announcements");
 
     fn announcement_form_post(uri: &str, payload: &str) -> TestRequest {
         TestRequest::post()
@@ -448,45 +449,13 @@ mod tests {
             .set_payload(payload.to_owned())
     }
 
-    macro_rules! seed_announcement {
-        ($app:expr) => {
-            let req = TestRequest::post()
-                .uri("/api/v1/announcements")
-                .set_json(json!({ "title": "Reunion", "body": "Save the date", "author": "Ada" }))
-                .to_request();
-            assert_eq!(test::call_service(&$app, req).await.status(), StatusCode::CREATED);
-        };
-    }
-
-    #[actix_web::test]
-    async fn announcements_page_lists_and_escapes_html() {
-        let app = test_app!();
-        let req = TestRequest::post()
-            .uri("/api/v1/announcements")
-            .set_json(json!({ "title": "<b>Reunion</b>", "body": "Save the date", "author": "Ada" }))
-            .to_request();
-        assert_eq!(
-            test::call_service(&app, req).await.status(),
-            StatusCode::CREATED
-        );
-
-        let resp = test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
-        assert_eq!(resp.status(), StatusCode::OK);
-        let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
-        assert!(content_type.starts_with("text/html"));
-        let body = body_text(resp).await;
-        assert!(body.contains("&lt;b&gt;Reunion&lt;/b&gt;"));
-        assert!(!body.contains("<b>Reunion</b>"));
-    }
-
     #[actix_web::test]
     async fn announcement_form_post_creates_and_redirects() {
-        let app = test_app!();
-        let req = announcement_form_post(
-            "/announcements",
-            "title=Reunion&body=Save+the+date&author=Ada",
-        )
-        .to_request();
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+        let req =
+            announcement_form_post("/announcements", "title=Reunion&body=Save+the+date&author_id=1")
+                .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         assert_eq!(resp.headers().get(LOCATION).unwrap(), "/announcements");
@@ -498,39 +467,69 @@ mod tests {
         .await;
         assert_eq!(announcement.title, "Reunion");
         assert_eq!(announcement.body, "Save the date");
+
+        cleanup(&db).await;
     }
 
     #[actix_web::test]
     async fn announcement_form_post_with_invalid_input_shows_the_error() {
-        let app = test_app!();
-        let req =
-            announcement_form_post("/announcements", "title=&body=Save+the+date&author=Ada").to_request();
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+        let req = announcement_form_post(
+            "/announcements",
+            "title=&body=Save+the+date&author_id=1",
+        )
+        .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         let body = body_text(resp).await;
         assert!(body.contains("title must not be empty"));
         assert!(body.contains("Save the date"));
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn announcement_form_post_with_unknown_author_shows_the_error() {
+        let (app, db) = test_app!();
+        let req = announcement_form_post(
+            "/announcements",
+            "title=Reunion&body=Save+the+date&author_id=999",
+        )
+        .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_text(resp).await;
+        assert!(body.contains("unknown author_id"));
+
+        cleanup(&db).await;
     }
 
     #[actix_web::test]
     async fn announcements_index_page_links_each_row_to_show_edit_and_delete() {
-        let app = test_app!();
+        let (app, db) = test_app!();
         seed_announcement!(app);
 
-        let resp = test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
+        let resp =
+            test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
         let body = body_text(resp).await;
         assert!(body.contains(r#"href="/announcements/1""#));
         assert!(body.contains(r#"href="/announcements/1/edit""#));
         assert!(body.contains(r#"action="/announcements/1/delete""#));
+
+        cleanup(&db).await;
     }
 
     #[actix_web::test]
     async fn announcement_show_and_edit_pages_render_the_announcement() {
-        let app = test_app!();
+        let (app, db) = test_app!();
         seed_announcement!(app);
 
-        let resp =
-            test::call_service(&app, TestRequest::get().uri("/announcements/1").to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::get().uri("/announcements/1").to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK);
         let body = body_text(resp).await;
         assert!(body.contains("Save the date"));
@@ -545,18 +544,20 @@ mod tests {
         let body = body_text(resp).await;
         assert!(body.contains(r#"value="Reunion""#));
         assert!(body.contains(r#"action="/announcements/1""#));
+
+        cleanup(&db).await;
     }
 
     #[actix_web::test]
     async fn announcement_form_post_updates_and_redirects() {
-        let app = test_app!();
+        let (app, db) = test_app!();
         seed_announcement!(app);
 
         let resp = test::call_service(
             &app,
             announcement_form_post(
                 "/announcements/1",
-                "title=Picnic&body=Bring+food&author=Grace",
+                "title=Picnic&body=Bring+food&author_id=1",
             )
             .to_request(),
         )
@@ -570,28 +571,33 @@ mod tests {
         )
         .await;
         assert_eq!(announcement.title, "Picnic");
-        assert_eq!(announcement.author, "Grace");
+        assert_eq!(announcement.author_id, 1);
+
+        cleanup(&db).await;
     }
 
     #[actix_web::test]
     async fn announcement_form_post_update_with_invalid_input_shows_the_edit_page_with_error() {
-        let app = test_app!();
+        let (app, db) = test_app!();
         seed_announcement!(app);
 
         let resp = test::call_service(
             &app,
-            announcement_form_post("/announcements/1", "title=&body=Bring+food&author=Grace").to_request(),
+            announcement_form_post("/announcements/1", "title=&body=Bring+food&author_id=1")
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         let body = body_text(resp).await;
         assert!(body.contains("title must not be empty"));
-        assert!(body.contains(r#"value="Grace""#));
+        assert!(body.contains("Bring food"));
+
+        cleanup(&db).await;
     }
 
     #[actix_web::test]
     async fn announcement_form_post_deletes_and_redirects() {
-        let app = test_app!();
+        let (app, db) = test_app!();
         seed_announcement!(app);
 
         let resp = test::call_service(
@@ -608,16 +614,20 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
     }
 
     #[actix_web::test]
     async fn missing_announcement_renders_an_html_404_page() {
-        let app = test_app!();
+        let (app, db) = test_app!();
 
         let requests = [
             TestRequest::get().uri("/announcements/99").to_request(),
-            TestRequest::get().uri("/announcements/99/edit").to_request(),
-            announcement_form_post("/announcements/99", "title=T&body=B&author=A").to_request(),
+            TestRequest::get()
+                .uri("/announcements/99/edit")
+                .to_request(),
+            announcement_form_post("/announcements/99", "title=T&body=B&author_id=1").to_request(),
             announcement_form_post("/announcements/99/delete", "").to_request(),
         ];
         for req in requests {
@@ -626,5 +636,7 @@ mod tests {
             let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
             assert!(content_type.starts_with("text/html"));
         }
+
+        cleanup(&db).await;
     }
 }

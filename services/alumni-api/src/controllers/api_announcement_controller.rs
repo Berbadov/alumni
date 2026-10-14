@@ -3,7 +3,7 @@
 
 use actix_web::{HttpResponse, web};
 
-use crate::announcement_store::AnnouncementStore;
+use crate::AppState;
 use crate::error::ApiError;
 use crate::models::{Announcement, CreateAnnouncement, UpdateAnnouncement};
 
@@ -15,14 +15,14 @@ use crate::models::{Announcement, CreateAnnouncement, UpdateAnnouncement};
     request_body = CreateAnnouncement,
     responses(
         (status = 201, description = "Announcement created", body = Announcement),
-        (status = 400, description = "Empty title, body or author"),
+        (status = 400, description = "Empty title or body, or unknown author"),
     ),
 )]
 pub async fn create(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     body: web::Json<CreateAnnouncement>,
 ) -> Result<HttpResponse, ApiError> {
-    let announcement = store.create(&body)?;
+    let announcement = state.announcements.create(&body).await?;
     Ok(HttpResponse::Created().json(announcement))
 }
 
@@ -33,10 +33,8 @@ pub async fn create(
     tag = "ApiAnnouncementController",
     responses((status = 200, description = "All announcements", body = [Announcement])),
 )]
-pub async fn list(
-    store: web::Data<AnnouncementStore>,
-) -> Result<web::Json<Vec<Announcement>>, ApiError> {
-    Ok(web::Json(store.list()?))
+pub async fn list(state: web::Data<AppState>) -> Result<web::Json<Vec<Announcement>>, ApiError> {
+    Ok(web::Json(state.announcements.list().await?))
 }
 
 /// Returns one announcement by id.
@@ -51,10 +49,10 @@ pub async fn list(
     ),
 )]
 pub async fn get(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
 ) -> Result<web::Json<Announcement>, ApiError> {
-    Ok(web::Json(store.get(path.into_inner())?))
+    Ok(web::Json(state.announcements.get(path.into_inner()).await?))
 }
 
 /// Replaces every field of an announcement (404 if the id does not exist).
@@ -66,16 +64,21 @@ pub async fn get(
     params(("id" = u64, Path, description = "Announcement id")),
     responses(
         (status = 200, description = "Announcement replaced", body = Announcement),
-        (status = 400, description = "Empty title, body or author"),
+        (status = 400, description = "Empty title or body, or unknown author"),
         (status = 404, description = "No announcement with that id"),
     ),
 )]
 pub async fn replace(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
     body: web::Json<CreateAnnouncement>,
 ) -> Result<web::Json<Announcement>, ApiError> {
-    Ok(web::Json(store.replace(path.into_inner(), &body)?))
+    Ok(web::Json(
+        state
+            .announcements
+            .replace(path.into_inner(), &body)
+            .await?,
+    ))
 }
 
 /// Applies a partial update to an announcement (only provided fields change).
@@ -87,16 +90,21 @@ pub async fn replace(
     params(("id" = u64, Path, description = "Announcement id")),
     responses(
         (status = 200, description = "Announcement updated", body = Announcement),
-        (status = 400, description = "Empty title, body or author"),
+        (status = 400, description = "Empty title or body, or unknown author"),
         (status = 404, description = "No announcement with that id"),
     ),
 )]
 pub async fn update(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
     body: web::Json<UpdateAnnouncement>,
 ) -> Result<web::Json<Announcement>, ApiError> {
-    Ok(web::Json(store.update(path.into_inner(), body.into_inner())?))
+    Ok(web::Json(
+        state
+            .announcements
+            .update(path.into_inner(), body.into_inner())
+            .await?,
+    ))
 }
 
 /// Deletes an announcement by id.
@@ -111,9 +119,9 @@ pub async fn update(
     ),
 )]
 pub async fn delete(
-    store: web::Data<AnnouncementStore>,
+    state: web::Data<AppState>,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
-    store.delete(path.into_inner())?;
+    state.announcements.delete(path.into_inner()).await?;
     Ok(HttpResponse::NoContent().finish())
 }
