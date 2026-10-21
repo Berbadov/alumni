@@ -2,6 +2,23 @@
 
 Decisions and compromises, with rationale.
 
+## Job postings: mongosh migration, API-only CRUD, counter seeded from the largest id
+The repo has no migration tool yet, so `job_postings` ships as an idempotent
+`mongosh` script (`services/alumni-api/migrations/001_add_job_postings.js`).
+It creates the collection, the `author_id` and `is_active` indexes, and the
+counter. `$setOnInsert` keeps an existing counter unchanged; a new counter
+starts at the largest existing `_id` instead of `0`. This prevents duplicate
+ids when rows outlive the counter. Cost: migrations run by hand, each new
+migration needs its own script, and a full migration runner stays future work.
+The API also creates both indexes at startup, so the schema works even when the
+migration was not run.
+`ApiJobPostingController` serves JSON only under `/api/v1/job-postings`. The
+existing HTML controllers are legacy; the React/Leptos frontend is the planned
+View. `is_active` defaults to `true`, and the list route filters with
+`?active=true|false` instead of hiding rows in the store. `employment_type`
+stays free text and `apply_url` gets a prefix check only; stricter validation
+waits for the shared Model crate.
+
 ## Migration: tests need a live MongoDB
 Route tests connect to MongoDB (`MONGO_URI` or `localhost:27017`) and use one
 fresh database per test, dropped after. Pure data rules stay unit-tested with

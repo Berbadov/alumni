@@ -87,10 +87,10 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 
 | Layer | Part | File or container |
 | --- | --- | --- |
-| Model | Data shapes `Alumni`, `CreateAlumni`, `UpdateAlumni`, `Announcement`, `CreateAnnouncement`, `UpdateAnnouncement` | `services/alumni-api/src/models.rs` |
-| Model | MongoDB stores with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/alumni_store.rs`, `services/alumni-api/src/announcement_store.rs` |
-| Model | Atomic id counters (`alumni`, `announcements`) | `counters` collection, used inside the stores |
-| Model | Data rules: name, email, year, degree, title, body checks and the `ModelError` type | `services/alumni-api/src/models.rs` |
+| Model | Data shapes `Alumni`, `CreateAlumni`, `UpdateAlumni`, `Announcement`, `CreateAnnouncement`, `UpdateAnnouncement`, `JobPosting`, `CreateJobPosting`, `UpdateJobPosting` | `services/alumni-api/src/models.rs` |
+| Model | MongoDB stores with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/alumni_store.rs`, `services/alumni-api/src/announcement_store.rs`, `services/alumni-api/src/job_posting_store.rs` |
+| Model | Atomic id counters (`alumni`, `announcements`, `job_postings`) | `counters` collection, used inside the stores |
+| Model | Data rules: name, email, year, degree, title, body, and job posting checks plus the `ModelError` type | `services/alumni-api/src/models.rs` |
 | Model | Database settings and bind address | `services/alumni-api/src/config.rs` |
 | Model | Sample data and import | `seed/alumni.json`, `mongo-seed` container |
 | Model | Database | `mongo` container |
@@ -98,7 +98,8 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 | Controller | `ApiAlumniController`: functions for the alumni JSON CRUD | `services/alumni-api/src/controllers/api_alumni_controller.rs` |
 | Controller | `AnnouncementController`: functions for the announcement pages (list, create, show, edit, update, delete) | `services/alumni-api/src/controllers/announcement_controller.rs` |
 | Controller | `ApiAnnouncementController`: functions for the announcement JSON CRUD | `services/alumni-api/src/controllers/api_announcement_controller.rs` |
-| Controller | Route tables: `api_alumni.rs` (JSON), `announcement.rs` (pages) and `api_announcement.rs` (JSON) | `services/alumni-api/src/routes/` |
+| Controller | `ApiJobPostingController`: functions for the job posting JSON CRUD | `services/alumni-api/src/controllers/api_job_posting_controller.rs` |
+| Controller | Route tables: `api_alumni.rs` (JSON), `announcement.rs` (pages), `api_announcement.rs` (JSON), and `api_job_posting.rs` (JSON) | `services/alumni-api/src/routes/` |
 | Controller | Error type and HTTP status mapping `ApiError` | `services/alumni-api/src/error.rs` |
 | Controller | Stores, `/api/v1` scope, indexes, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
 | View | HTML pages for announcements (maud templates) | `services/alumni-api/src/views/` |
@@ -108,7 +109,7 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 
 | Layer | Part | Planned location |
 | --- | --- | --- |
-| Model | `Alumni` and `Announcement` structs | `crates/alumni-model/` |
+| Model | `Alumni`, `Announcement`, and `JobPosting` structs | `crates/alumni-model/` |
 | Controller | Functions and signals that call the API and hold the page state | `frontend/src/controllers/` |
 | Controller | Route table | `frontend/src/app.rs` |
 | View | Page components | `frontend/src/pages/` |
@@ -192,6 +193,22 @@ Each announcement links to an alumni record through `author_id`. An unknown
 | `PATCH /api/v1/announcements/{id}` | Partial update, or status 404 |
 | `DELETE /api/v1/announcements/{id}` | Status 204, or status 404 |
 
+`ApiJobPostingController` serves the job posting JSON routes under
+`/api/v1/job-postings`. Each posting links to an alumni record through
+`author_id`. An unknown `author_id` fails with status 400. `is_active`
+defaults to `true`; use `GET /api/v1/job-postings?active=true` to hide
+inactive rows. Delete of an alumni record with job postings fails with
+status 400.
+
+| Route | Returns |
+| --- | --- |
+| `POST /api/v1/job-postings` | The new job posting (status 201). Fields: `title`, `company`, `description`, `location`, `employment_type`, `apply_url`, `author_id`, optional `is_active` |
+| `GET /api/v1/job-postings` | All job postings, ordered by id. Optional query: `active=true` or `active=false` |
+| `GET /api/v1/job-postings/{id}` | One job posting, or status 404 |
+| `PUT /api/v1/job-postings/{id}` | Full replacement, or status 404 |
+| `PATCH /api/v1/job-postings/{id}` | Partial update, or status 404 |
+| `DELETE /api/v1/job-postings/{id}` | Status 204, or status 404 |
+
 `AnnouncementController` serves the announcement pages as HTML. An HTML form sends only GET and POST. For this
 reason, update and delete are POST routes. After a successful change, the page redirects
 (status 303). If the input is not valid, the page shows the error with status 400. If the announcement
@@ -207,7 +224,8 @@ does not exist, the page shows an HTML 404 page.
 | `POST /announcements/{id}/delete` | Deletes one announcement |
 
 The Swagger UI shows all routes, grouped by the tags `ApiAlumniController`,
-`AnnouncementController` and `ApiAnnouncementController`:
+`AnnouncementController`, `ApiAnnouncementController`, and
+`ApiJobPostingController`:
 http://localhost:8080/api/swagger. The gateway also serves it at
 http://localhost/api/swagger. The gateway proxies `/announcements` to the API.
 
