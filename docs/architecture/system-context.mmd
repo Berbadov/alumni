@@ -1,6 +1,6 @@
 %% C4 context-level: who interacts with the system
 flowchart LR
-    Student(["Student / Alumnus"]) --> Frontend["Frontend (React+Vite)"]
+    Student(["Student / Alumnus"]) --> Frontend["Frontend (Leptos/WASM)"]
     ClassAdmin(["Class admin"]) --> Frontend
     Frontend -->|HTTP /api/v1| API["alumni-api (actix-web)"]
     API -->|read/write| Mongo[("MongoDB")]

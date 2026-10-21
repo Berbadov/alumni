@@ -1,0 +1,29 @@
+[
+  {
+    "_id": {"$numberLong": "1"},
+    "job_posting_id": {"$numberLong": "1"},
+    "alumni_id": {"$numberLong": "2"},
+    "cover_letter": "I build component libraries and care about accessibility.",
+    "status": "reviewed",
+    "created_at": {"$date": "2026-10-05T11:00:00Z"},
+    "updated_at": {"$date": "2026-10-06T14:00:00Z"}
+  },
+  {
+    "_id": {"$numberLong": "2"},
+    "job_posting_id": {"$numberLong": "1"},
+    "alumni_id": {"$numberLong": "3"},
+    "cover_letter": "I would like to grow my frontend skills on this team.",
+    "status": "submitted",
+    "created_at": {"$date": "2026-10-05T12:30:00Z"},
+    "updated_at": {"$date": "2026-10-05T12:30:00Z"}
+  },
+  {
+    "_id": {"$numberLong": "3"},
+    "job_posting_id": {"$numberLong": "2"},
+    "alumni_id": {"$numberLong": "1"},
+    "cover_letter": "I have Rust and MongoDB experience from the alumni project.",
+    "status": "accepted",
+    "created_at": {"$date": "2026-10-06T09:45:00Z"},
+    "updated_at": {"$date": "2026-10-07T16:20:00Z"}
+  }
+]

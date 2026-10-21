@@ -1,5 +1,5 @@
-use mongodb::bson::{DateTime, Document, doc};
 use futures_util::TryStreamExt;
+use mongodb::bson::{DateTime, Document, doc};
 use mongodb::error::{ErrorKind, WriteFailure};
 use mongodb::options::ReturnDocument;
 use mongodb::{Collection, Database};
@@ -23,6 +23,7 @@ pub struct AlumniStore {
     alumni: Collection<Document>,
     announcements: Collection<Document>,
     job_postings: Collection<Document>,
+    job_applications: Collection<Document>,
     counters: Collection<Document>,
 }
 
@@ -32,6 +33,7 @@ impl AlumniStore {
             alumni: db.collection("alumni"),
             announcements: db.collection("announcements"),
             job_postings: db.collection("job_postings"),
+            job_applications: db.collection("job_applications"),
             counters: db.collection("counters"),
         }
     }
@@ -78,7 +80,9 @@ impl AlumniStore {
             .find_one(doc! { "_id": key })
             .await
             .map_err(ModelError::internal)?;
-        doc.map(|doc| Alumni::from_doc(&doc)).transpose()?.ok_or(ModelError::NotFound)
+        doc.map(|doc| Alumni::from_doc(&doc))
+            .transpose()?
+            .ok_or(ModelError::NotFound)
     }
 
     pub async fn list(&self) -> Result<Vec<Alumni>, ModelError> {
@@ -172,6 +176,14 @@ impl AlumniStore {
             .map_err(ModelError::internal)?;
         if used > 0 {
             return Err(ModelError::Blocked("alumni has job postings"));
+        }
+        let used = self
+            .job_applications
+            .count_documents(doc! { "alumni_id": key })
+            .await
+            .map_err(ModelError::internal)?;
+        if used > 0 {
+            return Err(ModelError::Blocked("alumni has job applications"));
         }
         let deleted = self
             .alumni

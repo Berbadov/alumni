@@ -13,16 +13,14 @@ Write the README and all files in `docs/` in Simplified Technical English (ASD-S
 
 ## Status
 
-The backend is Rust and runs today. The frontend plan is a Rust WASM app built with Leptos.
-The repository still contains the React frontend. It is temporary. The Leptos frontend replaces
-it, and all `.ts` and `.tsx` files go away. The Stack, Layout and MVC sections describe the
-planned frontend. The sections for the backend describe the code as it is today.
+The backend and frontend are Rust and run today. The frontend is a Rust WASM app built with
+Leptos and Trunk. The React frontend is gone.
 
 ## Stack
 
 - **Backend:** Rust, actix-web 4, MongoDB (official driver). Service: `alumni-api`.
-- **Frontend (planned):** Rust compiled to WASM. Framework: Leptos in client-side rendering (CSR)
-  mode. Build tool: Trunk. Styling: Tailwind CSS. nginx serves the built files.
+- **Frontend:** Rust compiled to WASM. Framework: Leptos in client-side rendering (CSR)
+  mode. Build tool: Trunk. Styling: plain CSS. nginx serves the built files.
 - **Shared model (planned):** one Rust crate, `alumni-model`, used by the backend and the frontend.
 - **Database:** MongoDB 7.
 - **Runtime:** all parts run in Docker with `docker compose`.
@@ -32,7 +30,7 @@ planned frontend. The sections for the backend describe the code as it is today.
 ```
 alumni/
   services/alumni-api/    # Rust actix-web backend
-  frontend/               # Rust + Leptos WASM client (planned; React client until then)
+  frontend/               # Rust + Leptos WASM client
   crates/alumni-model/    # Shared Model structs (planned)
   docs/                   # backlog, done log, trade-offs, architecture diagrams
   docker-compose.yml
@@ -87,52 +85,54 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 
 | Layer | Part | File or container |
 | --- | --- | --- |
-| Model | Data shapes `Alumni`, `CreateAlumni`, `UpdateAlumni`, `Announcement`, `CreateAnnouncement`, `UpdateAnnouncement`, `JobPosting`, `CreateJobPosting`, `UpdateJobPosting` | `services/alumni-api/src/models.rs` |
-| Model | MongoDB stores with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/alumni_store.rs`, `services/alumni-api/src/announcement_store.rs`, `services/alumni-api/src/job_posting_store.rs` |
-| Model | Atomic id counters (`alumni`, `announcements`, `job_postings`) | `counters` collection, used inside the stores |
-| Model | Data rules: name, email, year, degree, title, body, and job posting checks plus the `ModelError` type | `services/alumni-api/src/models.rs` |
+| Model | Data shapes `Alumni`, `Announcement`, `JobPosting`, and `JobApplication` with their create/update DTOs | `services/alumni-api/src/models.rs` |
+| Model | MongoDB stores with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/alumni_store.rs`, `services/alumni-api/src/announcement_store.rs`, `services/alumni-api/src/job_posting_store.rs`, `services/alumni-api/src/job_application_store.rs` |
+| Model | Atomic id counters (`alumni`, `announcements`, `job_postings`, `job_applications`) | `counters` collection, used inside the stores |
+| Model | Data rules: name, email, year, degree, title, body, posting, and application status checks plus the `ModelError` type | `services/alumni-api/src/models.rs` |
 | Model | Database settings and bind address | `services/alumni-api/src/config.rs` |
-| Model | Sample data and import | `seed/alumni.json`, `mongo-seed` container |
+| Model | Sample data and import | `services/alumni-api/seed/`, `mongo-seed` container |
 | Model | Database | `mongo` container |
 | Controller | Route functions for health, hello and sum | `services/alumni-api/src/handlers.rs` |
 | Controller | `ApiAlumniController`: functions for the alumni JSON CRUD | `services/alumni-api/src/controllers/api_alumni_controller.rs` |
 | Controller | `AnnouncementController`: functions for the announcement pages (list, create, show, edit, update, delete) | `services/alumni-api/src/controllers/announcement_controller.rs` |
 | Controller | `ApiAnnouncementController`: functions for the announcement JSON CRUD | `services/alumni-api/src/controllers/api_announcement_controller.rs` |
 | Controller | `ApiJobPostingController`: functions for the job posting JSON CRUD | `services/alumni-api/src/controllers/api_job_posting_controller.rs` |
-| Controller | Route tables: `api_alumni.rs` (JSON), `announcement.rs` (pages), `api_announcement.rs` (JSON), and `api_job_posting.rs` (JSON) | `services/alumni-api/src/routes/` |
+| Controller | `ApiJobApplicationController`: functions for the job application JSON CRUD | `services/alumni-api/src/controllers/api_job_application_controller.rs` |
+| Controller | Route tables: `api_alumni.rs` (JSON), `announcement.rs` (pages), `api_announcement.rs` (JSON), `api_job_posting.rs` (JSON), and `api_job_application.rs` (JSON) | `services/alumni-api/src/routes/` |
 | Controller | Error type and HTTP status mapping `ApiError` | `services/alumni-api/src/error.rs` |
 | Controller | Stores, `/api/v1` scope, indexes, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
 | View | HTML pages for announcements (maud templates) | `services/alumni-api/src/views/` |
 | View | JSON responses that the API returns | Serde derive on the Model structs |
 
-### Frontend mapping (planned)
+### Frontend mapping
 
-| Layer | Part | Planned location |
+| Layer | Part | Location |
 | --- | --- | --- |
-| Model | `Alumni`, `Announcement`, and `JobPosting` structs | `crates/alumni-model/` |
-| Controller | Functions and signals that call the API and hold the page state | `frontend/src/controllers/` |
-| Controller | Route table | `frontend/src/app.rs` |
+| Model | `Alumni`, `JobPosting`, and `JobApplication` structs | `frontend/src/api.rs` (until the shared crate exists) |
+| Controller | API client and page signals | `frontend/src/api.rs`, `frontend/src/pages/` |
+| Controller | Route table | `frontend/src/main.rs` |
 | View | Page components | `frontend/src/pages/` |
-| View | Shared components (layout, theme toggle, table) | `frontend/src/components/` |
-| View | Tailwind CSS styles | `frontend/` stylesheet |
+| View | Shared components (layout, theme toggle, navigation) | `frontend/src/components.rs` |
+| View | Plain CSS styles | `frontend/style.css` |
 | View | Static file server | `frontend` container (nginx) |
 
 ### Rules
 
-- A View must not call the API. It must call a controller.
+- A View must call the API only through `frontend/src/api.rs`.
 - A controller must not hold data rules. It must call the Model.
 - The Model must not know about HTTP, routes or pages.
-- The backend and the frontend must import `Alumni` from `alumni-model`. Do not copy it.
+- The backend and the frontend must import shared types from `alumni-model` when the crate exists. Until then, `frontend/src/api.rs` mirrors the JSON shapes.
 
 ### Known gaps
 
-- The `alumni-model` crate and the `crates/` folder are not in the repository yet. `AGENTS.md`
-  must list the `crates/` folder when you add it.
+- The `alumni-model` crate and the `crates/` folder are not in the repository yet. The frontend
+  mirrors the API JSON shapes in `frontend/src/api.rs`.
 - Docker builds for `alumni-api` and the frontend must use the repository root as build context
   to read the shared crate.
 - Filter queries scan: no indexes exist on `graduation_year`, `degree`, or `full_name` yet.
 - `cargo test` needs MongoDB on `localhost:27017` (or sets `MONGO_URI`).
 - `docs/ddd.md` defines the target database design. The code follows it.
+- Job application status history and reviewer actions are not implemented.
 
 ## Run
 
@@ -147,12 +147,14 @@ Then open these addresses:
 - Frontend: http://localhost (nginx serves the built app on port 80)
 - API: http://localhost:8080/api/v1/alumni
 
-The first `up` command fills MongoDB with sample alumni. The `mongo-seed` container does this.
+The first `up` command fills MongoDB with sample alumni, job postings, and applications. The
+`mongo-seed` container does this.
 
 ## Routes
 
-The SPA has these pages: `/` (home), `/alumni` (list) and `/about` (placeholder with a Prufrock
-poem). For an unknown path, the SPA router shows the 404 page.
+The SPA has these pages: `/` (home), `/alumni` (list), `/jobs` (list and filters),
+`/jobs/{id}` (detail and apply form), `/applications` (list, filters, and status update), and
+`/about` (placeholder with a Prufrock poem). For an unknown path, the SPA shows the 404 page.
 
 The API has these routes under `/api/v1`. Use port 8080 for the API or port 80 for the gateway.
 
@@ -209,6 +211,22 @@ status 400.
 | `PATCH /api/v1/job-postings/{id}` | Partial update, or status 404 |
 | `DELETE /api/v1/job-postings/{id}` | Status 204, or status 404 |
 
+`ApiJobApplicationController` serves the job application JSON routes under
+`/api/v1/job-applications`. Each application links to one posting and one alumni.
+A duplicate application fails with status 400. Status values: `submitted`,
+`reviewed`, `accepted`, `rejected`; the default is `submitted`. Delete of a
+posting or an alumni with applications fails with status 400.
+
+| Route | Returns |
+| --- | --- |
+| `POST /api/v1/job-applications` | The new application (status 201). Fields: `job_posting_id`, `alumni_id`, `cover_letter`, optional `status` |
+| `GET /api/v1/job-applications` | All applications, ordered by id. Optional query: `job_posting_id`, `alumni_id`, `status` |
+| `GET /api/v1/job-applications/{id}` | One application, or status 404 |
+| `PUT /api/v1/job-applications/{id}` | Full replacement, or status 404 |
+| `PATCH /api/v1/job-applications/{id}` | Partial update, or status 404 |
+| `DELETE /api/v1/job-applications/{id}` | Status 204, or status 404 |
+| `GET /api/v1/job-postings/{id}/applications` | Applications for one posting |
+
 `AnnouncementController` serves the announcement pages as HTML. An HTML form sends only GET and POST. For this
 reason, update and delete are POST routes. After a successful change, the page redirects
 (status 303). If the input is not valid, the page shows the error with status 400. If the announcement
@@ -224,8 +242,8 @@ does not exist, the page shows an HTML 404 page.
 | `POST /announcements/{id}/delete` | Deletes one announcement |
 
 The Swagger UI shows all routes, grouped by the tags `ApiAlumniController`,
-`AnnouncementController`, `ApiAnnouncementController`, and
-`ApiJobPostingController`:
+`AnnouncementController`, `ApiAnnouncementController`,
+`ApiJobPostingController`, and `ApiJobApplicationController`:
 http://localhost:8080/api/swagger. The gateway also serves it at
 http://localhost/api/swagger. The gateway proxies `/announcements` to the API.
 

@@ -13,6 +13,7 @@ use crate::models::{
 pub struct JobPostingStore {
     alumni: Collection<Document>,
     job_postings: Collection<Document>,
+    job_applications: Collection<Document>,
     counters: Collection<Document>,
 }
 
@@ -21,6 +22,7 @@ impl JobPostingStore {
         Self {
             alumni: db.collection("alumni"),
             job_postings: db.collection("job_postings"),
+            job_applications: db.collection("job_applications"),
             counters: db.collection("counters"),
         }
     }
@@ -146,11 +148,7 @@ impl JobPostingStore {
         self.get(id).await
     }
 
-    pub async fn update(
-        &self,
-        id: u64,
-        input: UpdateJobPosting,
-    ) -> Result<JobPosting, ModelError> {
+    pub async fn update(&self, id: u64, input: UpdateJobPosting) -> Result<JobPosting, ModelError> {
         let mut set = Document::new();
         if let Some(title) = &input.title {
             validate_title(title)?;
@@ -200,6 +198,14 @@ impl JobPostingStore {
 
     pub async fn delete(&self, id: u64) -> Result<(), ModelError> {
         let key = i64::try_from(id).map_err(ModelError::internal)?;
+        let used = self
+            .job_applications
+            .count_documents(doc! { "job_posting_id": key })
+            .await
+            .map_err(ModelError::internal)?;
+        if used > 0 {
+            return Err(ModelError::Blocked("job posting has applications"));
+        }
         let deleted = self
             .job_postings
             .delete_one(doc! { "_id": key })

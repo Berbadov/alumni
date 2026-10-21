@@ -6,15 +6,16 @@ mod config;
 mod controllers;
 mod error;
 mod handlers;
+mod job_application_store;
 mod job_posting_store;
 mod models;
 mod routes;
 mod views;
 
-use actix_web::{middleware::Logger, web, App, HttpServer};
+use actix_web::{App, HttpServer, middleware::Logger, web};
 use controllers::{
     announcement_controller, api_alumni_controller, api_announcement_controller,
-    api_job_posting_controller,
+    api_job_application_controller, api_job_posting_controller,
 };
 use mongodb::bson::doc;
 use mongodb::options::ClientOptions;
@@ -24,6 +25,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use alumni_store::AlumniStore;
 use announcement_store::AnnouncementStore;
+use job_application_store::JobApplicationStore;
 use job_posting_store::JobPostingStore;
 
 #[derive(OpenApi)]
@@ -31,13 +33,14 @@ use job_posting_store::JobPostingStore;
     info(
         title = "alumni-api",
         version = "0.1.0",
-        description = "Alumni records (JSON), announcement pages (HTML), job postings (JSON), and their REST APIs."
+        description = "Alumni records, announcements, job postings, and job applications with their REST APIs."
     ),
     tags(
         (name = "ApiAlumniController", description = "JSON alumni CRUD under /api/v1/alumni"),
         (name = "AnnouncementController", description = "HTML pages under /announcements: list, create, show, edit, update, delete"),
         (name = "ApiAnnouncementController", description = "JSON announcement CRUD under /api/v1/announcements (alias: /api/announcements)"),
         (name = "ApiJobPostingController", description = "JSON job posting CRUD under /api/v1/job-postings"),
+        (name = "ApiJobApplicationController", description = "JSON job application CRUD under /api/v1/job-applications"),
     ),
     paths(
         handlers::health,
@@ -65,6 +68,13 @@ use job_posting_store::JobPostingStore;
         api_job_posting_controller::replace,
         api_job_posting_controller::update,
         api_job_posting_controller::delete,
+        api_job_application_controller::create,
+        api_job_application_controller::list,
+        api_job_application_controller::list_for_posting,
+        api_job_application_controller::get,
+        api_job_application_controller::replace,
+        api_job_application_controller::update,
+        api_job_application_controller::delete,
     ),
     components(schemas(
         models::Alumni,
@@ -76,6 +86,9 @@ use job_posting_store::JobPostingStore;
         models::JobPosting,
         models::CreateJobPosting,
         models::UpdateJobPosting,
+        models::JobApplication,
+        models::CreateJobApplication,
+        models::UpdateJobApplication,
         handlers::Health
     ))
 )]
@@ -86,6 +99,7 @@ pub struct AppState {
     pub alumni: AlumniStore,
     pub announcements: AnnouncementStore,
     pub job_postings: JobPostingStore,
+    pub job_applications: JobApplicationStore,
 }
 
 fn io_error(err: impl std::fmt::Display) -> std::io::Error {
@@ -117,27 +131,36 @@ async fn main() -> std::io::Result<()> {
         .await
         .map_err(io_error)?;
     db.collection::<mongodb::bson::Document>("announcements")
+        .create_index(IndexModel::builder().keys(doc! { "author_id": 1 }).build())
+        .await
+        .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("job_postings")
+        .create_index(IndexModel::builder().keys(doc! { "author_id": 1 }).build())
+        .await
+        .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("job_postings")
+        .create_index(IndexModel::builder().keys(doc! { "is_active": 1 }).build())
+        .await
+        .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("job_applications")
         .create_index(
             IndexModel::builder()
-                .keys(doc! { "author_id": 1 })
+                .keys(doc! { "job_posting_id": 1, "alumni_id": 1 })
+                .options(
+                    mongodb::options::IndexOptions::builder()
+                        .unique(true)
+                        .build(),
+                )
                 .build(),
         )
         .await
         .map_err(io_error)?;
-    db.collection::<mongodb::bson::Document>("job_postings")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "author_id": 1 })
-                .build(),
-        )
+    db.collection::<mongodb::bson::Document>("job_applications")
+        .create_index(IndexModel::builder().keys(doc! { "alumni_id": 1 }).build())
         .await
         .map_err(io_error)?;
-    db.collection::<mongodb::bson::Document>("job_postings")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "is_active": 1 })
-                .build(),
-        )
+    db.collection::<mongodb::bson::Document>("job_applications")
+        .create_index(IndexModel::builder().keys(doc! { "status": 1 }).build())
         .await
         .map_err(io_error)?;
 
@@ -145,6 +168,7 @@ async fn main() -> std::io::Result<()> {
         alumni: AlumniStore::new(&db),
         announcements: AnnouncementStore::new(&db),
         job_postings: JobPostingStore::new(&db),
+        job_applications: JobApplicationStore::new(&db),
     });
 
     let server = HttpServer::new(move || {
@@ -152,8 +176,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(state.clone())
             .wrap(Logger::default())
             .service(
-                SwaggerUi::new("/api/swagger/{_:.*}")
-                    .url("/api/openapi.json", ApiDoc::openapi()),
+                SwaggerUi::new("/api/swagger/{_:.*}").url("/api/openapi.json", ApiDoc::openapi()),
             )
             .service(handlers::health)
             .service(handlers::swagger_redirect)

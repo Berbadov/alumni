@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Alumni</title>
     <script>
       ;(function () {
@@ -13,9 +13,8 @@
         if (dark) document.documentElement.classList.add('dark')
       })()
     </script>
+    <link data-trunk rel="rust" data-wasm-opt="0" />
+    <link data-trunk rel="css" href="style.css" />
   </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+  <body></body>
 </html>

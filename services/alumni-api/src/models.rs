@@ -4,6 +4,8 @@ use utoipa::ToSchema;
 
 pub const MIN_GRADUATION_YEAR: i32 = 1900;
 pub const MAX_GRADUATION_YEAR: i32 = 2100;
+pub const JOB_APPLICATION_STATUSES: [&str; 4] = ["submitted", "reviewed", "accepted", "rejected"];
+pub const DEFAULT_JOB_APPLICATION_STATUS: &str = "submitted";
 
 #[derive(Debug, Clone)]
 pub enum ModelError {
@@ -47,7 +49,9 @@ fn read_u64(doc: &Document, key: &str, what: &str) -> Result<u64, ModelError> {
 }
 
 fn read_string(doc: &Document, key: &str, what: &str) -> Result<String, ModelError> {
-    doc.get_str(key).map_err(|_| corrupt(what)).map(str::to_owned)
+    doc.get_str(key)
+        .map_err(|_| corrupt(what))
+        .map(str::to_owned)
 }
 
 fn read_bool(doc: &Document, key: &str, what: &str) -> Result<bool, ModelError> {
@@ -226,6 +230,60 @@ pub struct UpdateJobPosting {
     pub is_active: Option<bool>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct JobApplication {
+    #[serde(rename = "_id")]
+    pub id: u64,
+    pub job_posting_id: u64,
+    pub alumni_id: u64,
+    pub cover_letter: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl JobApplication {
+    pub fn from_doc(doc: &Document) -> Result<Self, ModelError> {
+        Ok(Self {
+            id: read_u64(doc, "_id", "job application")?,
+            job_posting_id: read_u64(doc, "job_posting_id", "job application")?,
+            alumni_id: read_u64(doc, "alumni_id", "job application")?,
+            cover_letter: read_string(doc, "cover_letter", "job application")?,
+            status: read_string(doc, "status", "job application")?,
+            created_at: read_time(doc, "created_at", "job application")?,
+            updated_at: read_time(doc, "updated_at", "job application")?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateJobApplication {
+    pub job_posting_id: u64,
+    pub alumni_id: u64,
+    pub cover_letter: String,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct UpdateJobApplication {
+    #[serde(default)]
+    pub job_posting_id: Option<u64>,
+    #[serde(default)]
+    pub alumni_id: Option<u64>,
+    #[serde(default)]
+    pub cover_letter: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct JobApplicationFilter {
+    pub job_posting_id: Option<u64>,
+    pub alumni_id: Option<u64>,
+    pub status: Option<String>,
+}
+
 pub fn validate_full_name(value: &str) -> Result<(), ModelError> {
     if value.trim().is_empty() {
         return Err(ModelError::Invalid("full_name must not be empty"));
@@ -314,11 +372,25 @@ pub fn validate_apply_url(value: &str) -> Result<(), ModelError> {
     Ok(())
 }
 
+pub fn validate_status(value: &str) -> Result<(), ModelError> {
+    let status = clean_status(value);
+    if !JOB_APPLICATION_STATUSES.contains(&status.as_str()) {
+        return Err(ModelError::Invalid(
+            "status must be submitted, reviewed, accepted, or rejected",
+        ));
+    }
+    Ok(())
+}
+
 pub fn clean_name(value: &str) -> String {
     value.trim().to_owned()
 }
 
 pub fn clean_email(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+pub fn clean_status(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
@@ -365,10 +437,7 @@ mod tests {
         assert!(validate_degree("Web Development").is_ok());
         assert!(validate_title("Reunion").is_ok());
         assert!(validate_body("Save the date").is_ok());
-        assert!(matches!(
-            validate_degree(" "),
-            Err(ModelError::Invalid(_))
-        ));
+        assert!(matches!(validate_degree(" "), Err(ModelError::Invalid(_))));
         assert!(matches!(validate_title(""), Err(ModelError::Invalid(_))));
         assert!(matches!(validate_body("  "), Err(ModelError::Invalid(_))));
     }
@@ -406,5 +475,19 @@ mod tests {
                 "{bad} must fail"
             );
         }
+    }
+
+    #[test]
+    fn application_status_accepts_only_known_values() {
+        for good in ["submitted", " reviewed ", "ACCEPTED", "Rejected"] {
+            assert!(validate_status(good).is_ok(), "{good} must pass");
+        }
+        for bad in ["", "pending", "done", "submitted later"] {
+            assert!(
+                matches!(validate_status(bad), Err(ModelError::Invalid(_))),
+                "{bad} must fail"
+            );
+        }
+        assert_eq!(clean_status(" Reviewed "), "reviewed");
     }
 }

@@ -1,6 +1,7 @@
 pub mod announcement;
 pub mod api_alumni;
 pub mod api_announcement;
+pub mod api_job_application;
 pub mod api_job_posting;
 
 use actix_web::web;
@@ -9,6 +10,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.configure(api_alumni::configure)
         .configure(announcement::configure)
         .configure(api_announcement::configure)
+        .configure(api_job_application::configure)
         .configure(api_job_posting::configure);
 }
 
@@ -27,11 +29,12 @@ mod tests {
     use serde_json::json;
 
     use super::configure;
+    use crate::AppState;
     use crate::alumni_store::AlumniStore;
     use crate::announcement_store::AnnouncementStore;
+    use crate::job_application_store::JobApplicationStore;
     use crate::job_posting_store::JobPostingStore;
-    use crate::models::{Alumni, Announcement, JobPosting};
-    use crate::AppState;
+    use crate::models::{Alumni, Announcement, JobApplication, JobPosting};
 
     static TEST_DB_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -69,11 +72,29 @@ mod tests {
             .create_index(IndexModel::builder().keys(doc! { "is_active": 1 }).build())
             .await
             .unwrap();
+        db.collection::<Document>("job_applications")
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "job_posting_id": 1, "alumni_id": 1 })
+                    .options(IndexOptions::builder().unique(true).build())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        db.collection::<Document>("job_applications")
+            .create_index(IndexModel::builder().keys(doc! { "alumni_id": 1 }).build())
+            .await
+            .unwrap();
+        db.collection::<Document>("job_applications")
+            .create_index(IndexModel::builder().keys(doc! { "status": 1 }).build())
+            .await
+            .unwrap();
         (
             AppState {
                 alumni: AlumniStore::new(&db),
                 announcements: AnnouncementStore::new(&db),
                 job_postings: JobPostingStore::new(&db),
+                job_applications: JobApplicationStore::new(&db),
             },
             name,
         )
@@ -158,6 +179,28 @@ mod tests {
         };
     }
 
+    fn job_application_json() -> serde_json::Value {
+        json!({
+            "job_posting_id": 1,
+            "alumni_id": 1,
+            "cover_letter": "  I would like to join.  ",
+        })
+    }
+
+    macro_rules! seed_job_application {
+        ($app:expr) => {
+            seed_job_posting!($app);
+            let req = TestRequest::post()
+                .uri("/api/v1/job-applications")
+                .set_json(job_application_json())
+                .to_request();
+            assert_eq!(
+                test::call_service(&$app, req).await.status(),
+                StatusCode::CREATED
+            );
+        };
+    }
+
     #[actix_web::test]
     async fn alumni_create_get_patch_put_delete_lifecycle() {
         let (app, db) = test_app!();
@@ -199,8 +242,7 @@ mod tests {
         assert_eq!(replaced.full_name, "Ada");
         assert_eq!(replaced.email, "ada@math.org");
 
-        let resp =
-            test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+        let resp = test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
         let resp = test::call_service(&app, TestRequest::get().uri(uri).to_request()).await;
@@ -213,7 +255,10 @@ mod tests {
     async fn alumni_list_returns_all_in_id_order() {
         let (app, db) = test_app!();
 
-        for (name, email) in [("first", "first@example.com"), ("second", "second@example.com")] {
+        for (name, email) in [
+            ("first", "first@example.com"),
+            ("second", "second@example.com"),
+        ] {
             let req = TestRequest::post()
                 .uri("/api/v1/alumni")
                 .set_json(alumni_json(name, email))
@@ -326,7 +371,9 @@ mod tests {
 
         let req = TestRequest::post()
             .uri("/api/v1/announcements")
-            .set_json(json!({ "title": "  Reunion  ", "body": "  Save the date  ", "author_id": 1 }))
+            .set_json(
+                json!({ "title": "  Reunion  ", "body": "  Save the date  ", "author_id": 1 }),
+            )
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::CREATED);
@@ -337,11 +384,8 @@ mod tests {
         assert_eq!(created.author_id, 1);
 
         let uri = "/api/v1/announcements/1";
-        let announcement: Announcement = test::call_and_read_body_json(
-            &app,
-            TestRequest::get().uri(uri).to_request(),
-        )
-        .await;
+        let announcement: Announcement =
+            test::call_and_read_body_json(&app, TestRequest::get().uri(uri).to_request()).await;
         assert_eq!(announcement.title, "Reunion");
 
         let req = TestRequest::patch()
@@ -441,9 +485,7 @@ mod tests {
 
         let announcements: Vec<Announcement> = test::call_and_read_body_json(
             &app,
-            TestRequest::get()
-                .uri("/api/v1/announcements")
-                .to_request(),
+            TestRequest::get().uri("/api/v1/announcements").to_request(),
         )
         .await;
         assert_eq!(announcements.len(), 1);
@@ -482,11 +524,8 @@ mod tests {
         assert!(created.is_active);
 
         let uri = "/api/v1/job-postings/1";
-        let posting: JobPosting = test::call_and_read_body_json(
-            &app,
-            TestRequest::get().uri(uri).to_request(),
-        )
-        .await;
+        let posting: JobPosting =
+            test::call_and_read_body_json(&app, TestRequest::get().uri(uri).to_request()).await;
         assert_eq!(posting.title, "Rust Engineer");
 
         let req = TestRequest::patch()
@@ -687,16 +726,20 @@ mod tests {
     async fn announcement_form_post_creates_and_redirects() {
         let (app, db) = test_app!();
         seed_alumni!(app);
-        let req =
-            announcement_form_post("/announcements", "title=Reunion&body=Save+the+date&author_id=1")
-                .to_request();
+        let req = announcement_form_post(
+            "/announcements",
+            "title=Reunion&body=Save+the+date&author_id=1",
+        )
+        .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         assert_eq!(resp.headers().get(LOCATION).unwrap(), "/announcements");
 
         let announcement: Announcement = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/announcements/1")
+                .to_request(),
         )
         .await;
         assert_eq!(announcement.title, "Reunion");
@@ -709,11 +752,8 @@ mod tests {
     async fn announcement_form_post_with_invalid_input_shows_the_error() {
         let (app, db) = test_app!();
         seed_alumni!(app);
-        let req = announcement_form_post(
-            "/announcements",
-            "title=&body=Save+the+date&author_id=1",
-        )
-        .to_request();
+        let req = announcement_form_post("/announcements", "title=&body=Save+the+date&author_id=1")
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         let body = body_text(resp).await;
@@ -801,7 +841,9 @@ mod tests {
 
         let announcement: Announcement = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/announcements/1")
+                .to_request(),
         )
         .await;
         assert_eq!(announcement.title, "Picnic");
@@ -844,7 +886,9 @@ mod tests {
 
         let resp = test::call_service(
             &app,
-            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/announcements/1")
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -869,6 +913,195 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::NOT_FOUND);
             let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
             assert!(content_type.starts_with("text/html"));
+        }
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn job_application_create_get_patch_put_delete_lifecycle() {
+        let (app, db) = test_app!();
+        seed_job_posting!(app);
+
+        let req = TestRequest::post()
+            .uri("/api/v1/job-applications")
+            .set_json(job_application_json())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created: JobApplication = test::read_body_json(resp).await;
+        assert_eq!(created.id, 1);
+        assert_eq!(created.job_posting_id, 1);
+        assert_eq!(created.alumni_id, 1);
+        assert_eq!(created.cover_letter, "I would like to join.");
+        assert_eq!(created.status, "submitted");
+
+        let list: Vec<JobApplication> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/job-applications?job_posting_id=1&alumni_id=1&status=submitted")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(list.len(), 1);
+
+        let nested: Vec<JobApplication> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/job-postings/1/applications")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(nested.len(), 1);
+
+        let req = TestRequest::patch()
+            .uri("/api/v1/job-applications/1")
+            .set_json(json!({ "status": " Reviewed " }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let patched: JobApplication = test::read_body_json(resp).await;
+        assert_eq!(patched.status, "reviewed");
+        assert_eq!(patched.cover_letter, "I would like to join.");
+
+        let req = TestRequest::put()
+            .uri("/api/v1/job-applications/1")
+            .set_json(json!({
+                "job_posting_id": 1,
+                "alumni_id": 1,
+                "cover_letter": "Updated letter",
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let replaced: JobApplication = test::read_body_json(resp).await;
+        assert_eq!(replaced.cover_letter, "Updated letter");
+        assert_eq!(replaced.status, "submitted");
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete()
+                .uri("/api/v1/job-applications/1")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        let resp = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/job-applications/1")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn job_application_rejects_duplicates_unknown_refs_and_bad_status() {
+        let (app, db) = test_app!();
+        seed_job_application!(app);
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::post()
+                .uri("/api/v1/job-applications")
+                .set_json(job_application_json())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_text(resp).await;
+        assert!(body.contains("application already exists"));
+
+        for bad in [
+            json!({ "job_posting_id": 99, "alumni_id": 1, "cover_letter": "Hi" }),
+            json!({ "job_posting_id": 1, "alumni_id": 99, "cover_letter": "Hi" }),
+            json!({
+                "job_posting_id": 1,
+                "alumni_id": 1,
+                "cover_letter": "Hi",
+                "status": "pending",
+            }),
+        ] {
+            let resp = test::call_service(
+                &app,
+                TestRequest::post()
+                    .uri("/api/v1/job-applications")
+                    .set_json(bad)
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        }
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/job-applications?status=pending")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn deletes_are_blocked_while_a_job_application_exists() {
+        let (app, db) = test_app!();
+        seed_job_application!(app);
+
+        let req = TestRequest::post()
+            .uri("/api/v1/alumni")
+            .set_json(alumni_json("Grace Hopper", "grace@example.com"))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, req).await.status(),
+            StatusCode::CREATED
+        );
+        let req = TestRequest::post()
+            .uri("/api/v1/job-applications")
+            .set_json(json!({
+                "job_posting_id": 1,
+                "alumni_id": 2,
+                "cover_letter": "Second application",
+            }))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, req).await.status(),
+            StatusCode::CREATED
+        );
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete()
+                .uri("/api/v1/job-postings/1")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_text(resp).await;
+        assert!(body.contains("job posting has applications"));
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete().uri("/api/v1/alumni/2").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = body_text(resp).await;
+        assert!(body.contains("alumni has job applications"));
+
+        for uri in ["/api/v1/job-applications/1", "/api/v1/job-applications/2"] {
+            let resp = test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+            assert_eq!(resp.status(), StatusCode::NO_CONTENT, "{uri}");
+        }
+
+        for uri in ["/api/v1/job-postings/1", "/api/v1/alumni/1", "/api/v1/alumni/2"] {
+            let resp = test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+            assert_eq!(resp.status(), StatusCode::NO_CONTENT, "{uri}");
         }
 
         cleanup(&db).await;
