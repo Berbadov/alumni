@@ -1,8 +1,8 @@
 %% Docker compose containers, ports and volumes
 flowchart TB
     subgraph Host["Host (docker compose)"]
-        FE["frontend\nnginx + static SPA\nReact+Tailwind+shadcn/ui\n:80"]
-        API["alumni-api\nactix-web\n:8080\n/api/v1/alumni: JSON CRUD (MongoDB)\n/announcements: HTML pages (MongoDB)\n/api/v1/announcements: JSON CRUD\n/api/v1/job-postings: JSON CRUD\n/api: health, swagger"]
+        FE["frontend\nnginx + Leptos/WASM SPA\nTrunk build, plain CSS\n:80"]
+        API["alumni-api\nactix-web\n:8080\n/api/v1/alumni: JSON CRUD (MongoDB)\n/announcements: HTML pages (MongoDB)\n/api/v1/announcements: JSON CRUD\n/api/v1/job-postings: JSON CRUD\n/api/v1/job-applications: JSON CRUD\n/api: health, swagger"]
         Seed["mongo-seed\n(one-shot)"]
         DB["mongo:7\n:27017"]
         Vol[("mongo-data volume")]

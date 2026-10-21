@@ -2,6 +2,24 @@
 
 Completed work log, newest first.
 
+## 2026-10-21 — Job applications and Leptos frontend
+- `docs/ddd.md`: new `job_applications` collection with `job_posting_id`,
+  `alumni_id`, `cover_letter`, `status`, `created_at`, and `updated_at`.
+  Statuses: `submitted`, `reviewed`, `accepted`, `rejected`; default
+  `submitted`. One application per alumni and posting.
+- `services/alumni-api/migrations/002_add_job_applications.js`: idempotent
+  collection, unique compound index, `alumni_id` and `status` indexes, and
+  counter initialization.
+- Seed: 3 job postings and 3 applications; compose resets all four counters.
+- `JobApplicationStore` and `ApiJobApplicationController` serve JSON CRUD under
+  `/api/v1/job-applications` plus `GET /api/v1/job-postings/{id}/applications`.
+  Delete of a posting or alumni with applications fails with 400.
+- Replaced React with Leptos CSR. Pages: home, alumni, jobs, job detail/apply,
+  applications with status update, about, and 404. Plain CSS keeps the theme.
+  Trunk builds the WASM app; nginx serves it and proxies `/api/`.
+- Tests: 34 pass (1 model, 3 route). Clippy passes with `-D warnings`.
+- Verified in Docker: seed counts, application API, SPA routes, and gateway.
+
 ## 2026-10-21 — Job postings: schema, migration, and JSON CRUD
 - `docs/ddd.md`: new `job_postings` collection. Fields: `title`, `company`,
   `description`, `location`, `employment_type`, `apply_url`, `author_id`,

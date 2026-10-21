@@ -25,9 +25,15 @@ services:
       bash -c '
       mongoimport --host mongo --db alumni --collection alumni
       --drop --jsonArray --file /seed/alumni.json &&
+      mongoimport --host mongo --db alumni --collection job_postings
+      --drop --jsonArray --file /seed/job_postings.json &&
+      mongoimport --host mongo --db alumni --collection job_applications
+      --drop --jsonArray --file /seed/job_applications.json &&
       mongosh --host mongo --quiet alumni --eval
       "db.counters.replaceOne({_id: \"alumni\"}, {seq: 3}, {upsert: true});
-       db.counters.replaceOne({_id: \"announcements\"}, {seq: 0}, {upsert: true})"'
+       db.counters.replaceOne({_id: \"announcements\"}, {seq: 0}, {upsert: true});
+       db.counters.replaceOne({_id: \"job_postings\"}, {seq: 3}, {upsert: true});
+       db.counters.replaceOne({_id: \"job_applications\"}, {seq: 3}, {upsert: true})"'
 
   alumni-api:
     build: ./services/alumni-api

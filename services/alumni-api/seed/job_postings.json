@@ -1,0 +1,41 @@
+[
+  {
+    "_id": {"$numberLong": "1"},
+    "title": "Frontend Developer",
+    "company": "Kestrel Labs",
+    "description": "Build accessible interfaces with TypeScript and modern web APIs.",
+    "location": "Remote",
+    "employment_type": "Full-time",
+    "apply_url": "https://example.com/jobs/frontend",
+    "author_id": {"$numberLong": "1"},
+    "is_active": true,
+    "created_at": {"$date": "2026-10-02T09:00:00Z"},
+    "updated_at": {"$date": "2026-10-02T09:00:00Z"}
+  },
+  {
+    "_id": {"$numberLong": "2"},
+    "title": "Backend Engineer (Rust)",
+    "company": "Bluewave",
+    "description": "Design actix-web services and MongoDB data access for alumni tools.",
+    "location": "Berlin, Germany",
+    "employment_type": "Full-time",
+    "apply_url": "https://example.com/jobs/backend-rust",
+    "author_id": {"$numberLong": "2"},
+    "is_active": true,
+    "created_at": {"$date": "2026-10-03T10:30:00Z"},
+    "updated_at": {"$date": "2026-10-03T10:30:00Z"}
+  },
+  {
+    "_id": {"$numberLong": "3"},
+    "title": "Web Development Intern",
+    "company": "Campus Studio",
+    "description": "Support the class project with HTML, CSS, and API integration.",
+    "location": "Remote",
+    "employment_type": "Internship",
+    "apply_url": "https://example.com/jobs/intern",
+    "author_id": {"$numberLong": "3"},
+    "is_active": true,
+    "created_at": {"$date": "2026-10-04T08:15:00Z"},
+    "updated_at": {"$date": "2026-10-04T08:15:00Z"}
+  }
+]

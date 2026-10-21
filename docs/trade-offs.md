@@ -2,6 +2,25 @@
 
 Decisions and compromises, with rationale.
 
+## Job applications: unique compound index and current status only
+One alumni can apply once to one posting. A unique compound index on
+`(job_posting_id, alumni_id)` enforces this in the database; the store maps a
+duplicate-key error to a 400. Status changes overwrite the current status, so
+there is no reviewer history yet. History stays in the backlog. Deleting a
+posting or an alumni with applications is blocked instead of cascading, because
+silent data loss is worse than a 400 for this app.
+
+## Frontend: Leptos CSR with manual routing and plain CSS
+Replaced React with Leptos compiled to WASM and served by Trunk. Routing is a
+small `popstate` handler plus a `Route` enum, not `leptos_router`, because the
+app has few pages and this keeps the dependency surface small. Plain CSS reuses
+the existing green/blue variables instead of Tailwind/shadcn. Cost: no typed
+route helpers and hand-written styles. Benefit: one Rust stack and no Node
+build step.
+`data-wasm-opt="0"` disables Trunk's wasm-opt download in Docker. The download
+timed out during the image build; Rust's release profile already optimizes the
+WASM binary. Re-enable wasm-opt when the build network is reliable.
+
 ## Job postings: mongosh migration, API-only CRUD, counter seeded from the largest id
 The repo has no migration tool yet, so `job_postings` ships as an idempotent
 `mongosh` script (`services/alumni-api/migrations/001_add_job_postings.js`).
@@ -13,8 +32,8 @@ migration needs its own script, and a full migration runner stays future work.
 The API also creates both indexes at startup, so the schema works even when the
 migration was not run.
 `ApiJobPostingController` serves JSON only under `/api/v1/job-postings`. The
-existing HTML controllers are legacy; the React/Leptos frontend is the planned
-View. `is_active` defaults to `true`, and the list route filters with
+existing HTML controllers are legacy; the Leptos frontend is the View.
+`is_active` defaults to `true`, and the list route filters with
 `?active=true|false` instead of hiding rows in the store. `employment_type`
 stays free text and `apply_url` gets a prefix check only; stricter validation
 waits for the shared Model crate.

@@ -1,8 +1,9 @@
 # Database Design Document (DDD)
 
-Status: implemented for `alumni`, `announcements`, `job_postings`, and `counters`.
-The code follows this document.
-Today `alumni`, `announcements`, `job_postings`, and `counters` live in MongoDB.
+Status: implemented for `alumni`, `announcements`, `job_postings`,
+`job_applications`, and `counters`. The code follows this document.
+Today `alumni`, `announcements`, `job_postings`, `job_applications`, and
+`counters` live in MongoDB.
 See `services/alumni-api/src/main.rs` and `docs/trade-offs.md`.
 
 This document follows `README.md`. It uses one term for one thing.
@@ -14,6 +15,8 @@ It uses short sentences and the active voice.
 - `Announcement`: one news record. It lives in the `announcements` collection.
 - `Job posting`: one job offer that an alumni record publishes.
   It lives in the `job_postings` collection.
+- `Job application`: one alumni record applies to one job posting.
+  It lives in the `job_applications` collection.
 - `Counter`: one id counter record. It lives in the `counters` collection.
 - `alumni-model`: the shared Rust crate (planned, see `README.md` Layout).
   It holds the structs and the data rules. The backend and the frontend
@@ -29,8 +32,8 @@ It uses short sentences and the active voice.
 
 - Server: MongoDB 7, container `mongo` on port 27017.
 - Database name: `alumni` (env `MONGO_DB`).
-- Collections: `alumni`, `announcements`, `job_postings`, `counters`.
-  No `users` collection.
+- Collections: `alumni`, `announcements`, `job_postings`, `job_applications`,
+  `counters`. No `users` collection.
 
 ## Alumni schema
 
@@ -110,13 +113,44 @@ Rules:
 - The Model does not open `apply_url`. It checks the prefix only.
 - Sort by `_id`.
 
+## Job applications schema
+
+One document per application. The `alumni-model` crate will hold this struct.
+
+| Field | BSON type | Rust type | Required | Rule |
+| --- | --- | --- | --- | --- |
+| `_id` | int64 | u64, range `1..=i64::MAX` | yes | Server counter assigns it. Never reuse it. |
+| `job_posting_id` | int64 | u64 | yes | Must equal an existing `job_postings._id`. |
+| `alumni_id` | int64 | u64 | yes | Must equal an existing `alumni._id`. |
+| `cover_letter` | string | String | yes | Trim it. Empty is allowed. |
+| `status` | string | String | yes | One of `submitted`, `reviewed`, `accepted`, `rejected`. Default `submitted`. |
+| `created_at` | date | bson::DateTime | yes | Model sets it on create. UTC. |
+| `updated_at` | date | bson::DateTime | yes | Model sets it on create and on each update. UTC. |
+
+Rules:
+
+- One alumni record applies once to one job posting.
+  The pair `(job_posting_id, alumni_id)` is unique.
+  A duplicate fails in MongoDB with error `11000`.
+  The Controller maps it to status `400` with "application already exists".
+- Delete of a job posting with applications fails with status `400`.
+  The Model checks `job_applications` by `job_posting_id` before it deletes.
+- Delete of an alumni row with applications fails with status `400`.
+  The Model checks `job_applications` by `alumni_id` before it deletes.
+- The Model sets `status` to `submitted` when the create request omits it.
+  The Model lowercases and trims `status` before each write.
+- The list route filters by `job_posting_id`, `alumni_id`, or `status`.
+- The nested route `GET /api/v1/job-postings/{id}/applications` lists one
+  posting's applications.
+- Sort by `_id`.
+
 ## Counters schema
 
 One document per id series. It replaces `AtomicU64` in the old memory stores.
 
 | Field | BSON type | Rust type | Required | Rule |
 | --- | --- | --- | --- | --- |
-| `_id` | string | String | yes | `"alumni"`, `"announcements"`, or `"job_postings"`. |
+| `_id` | string | String | yes | `"alumni"`, `"announcements"`, `"job_postings"`, or `"job_applications"`. |
 | `seq` | int64 | u64 | yes | Last assigned id. |
 
 Rules:
@@ -139,6 +173,11 @@ migration when no API code exists yet. Repeat runs must succeed.
 - `job_postings._id`: default primary index.
 - `job_postings.author_id`: plain index. It speeds the block-delete check.
 - `job_postings.is_active`: plain index. It speeds the active-posting filter.
+- `job_applications._id`: default primary index.
+- `job_applications.(job_posting_id, alumni_id)`: unique compound index.
+  It enforces one application per alumni per posting and serves posting filters.
+- `job_applications.alumni_id`: plain index. It speeds the block-delete check.
+- `job_applications.status`: plain index. It speeds the status filter.
 
 No indexes on `graduation_year`, `degree`, `full_name`, `location`,
 `employment_type`, or `title` yet.
@@ -150,12 +189,16 @@ State this limit in the next backlog review.
 ```text
 alumni (1) ──< announcements (author_id)
 alumni (1) ──< job_postings (author_id)
-counters (1) ──  alumni + announcements + job_postings (assigns _id)
+alumni (1) ──< job_applications (alumni_id)
+job_postings (1) ──< job_applications (job_posting_id)
+counters (1) ──  alumni + announcements + job_postings + job_applications (assigns _id)
 ```
 
-- `announcements.author_id` and `job_postings.author_id` reference `alumni._id`.
-  MongoDB checks nothing. The Model checks them on write and on alumni delete.
-- No joins in reads. To show an author name, query `alumni` by `author_id`.
+- `announcements.author_id`, `job_postings.author_id`,
+  `job_applications.job_posting_id`, and `job_applications.alumni_id`
+  reference other documents. MongoDB checks nothing.
+  The Model checks them on write and on delete.
+- No joins in reads. To show an author or applicant name, query `alumni` by id.
 - No cascade deletes. Block wins over delete.
 
 ## Validation location
@@ -169,34 +212,34 @@ counters (1) ──  alumni + announcements + job_postings (assigns _id)
 ## Seed and migration
 
 Seed runs in development only. Never run it against production data.
-`mongo-seed` uses `mongoimport --drop` on `alumni` today. Keep `--drop` for dev only.
+`mongo-seed` uses `mongoimport --drop` on the seed collections today.
+Keep `--drop` for dev only.
 
 Dev reset steps:
 
 1. Stop the API. Drop the dev database.
-2. Import seed alumni as `_id` `1, 2, 3` with fixed UTC timestamps.
-   Map old `"a1"`, `"a2"`, `"a3"` to `1`, `2`, `3`.
-3. Set `counters` to `{_id: "alumni", seq: 3}` and
-   `{_id: "announcements", seq: 0}`.
-4. Run `services/alumni-api/migrations/001_add_job_postings.js`.
-   It creates the `job_postings` collection, its indexes, and the
-   `{_id: "job_postings", seq: 0}` counter when the counter is absent.
-   If posting rows exist without a counter, its `seq` starts at the largest
-   existing `_id` instead of `0`.
+2. Import seed alumni, job postings, and job applications with fixed `_id`
+   values and UTC timestamps.
+3. Set `counters` to `alumni` `3`, `announcements` `0`, `job_postings` `3`,
+   and `job_applications` `3`.
+4. Run `services/alumni-api/migrations/001_add_job_postings.js` and
+   `services/alumni-api/migrations/002_add_job_applications.js` in order.
 
 Migration rules:
 
-- The job postings migration is idempotent. Run it after each deploy.
-- The migration does not reset an existing `job_postings` counter.
+- Both migrations are idempotent. Run them after each deploy.
+- The migrations do not reset an existing counter.
   A reset can assign duplicate ids while rows exist.
-- The seed does not create job posting rows.
+- A missing counter starts at the largest existing `_id` instead of `0`.
+- The seed creates job posting and application rows.
 
-Run the migration in Docker:
+Run the migrations in Docker:
 
 ```bash
-docker compose cp services/alumni-api/migrations/001_add_job_postings.js \
-  mongo:/tmp/001_add_job_postings.js
-docker compose exec mongo mongosh --quiet /tmp/001_add_job_postings.js
+for file in 001_add_job_postings.js 002_add_job_applications.js; do
+  docker compose cp "services/alumni-api/migrations/$file" "mongo:/tmp/$file"
+  docker compose exec mongo mongosh --quiet "/tmp/$file"
+done
 ```
 
 ## Auth reserve
@@ -213,7 +256,7 @@ docker compose exec mongo mongosh --quiet /tmp/001_add_job_postings.js
 - Pagination cursors for list routes.
 - Stronger email format check.
 - MongoDB `$jsonSchema` validator.
-- Job posting pages and the frontend list.
+- Job application status history and reviewer actions.
 - `events` collection and `notifications` service.
 - Sessions and password reset flow.
 
@@ -252,13 +295,25 @@ erDiagram
         date created_at "set by Model"
         date updated_at "set by Model"
     }
+    JOB_APPLICATIONS {
+        int _id "u64, counter"
+        int job_posting_id "FK to JOB_POSTINGS._id, block delete"
+        int alumni_id "FK to ALUMNI._id, block delete"
+        string cover_letter "trimmed, empty allowed"
+        string status "submitted|reviewed|accepted|rejected"
+        date created_at "set by Model"
+        date updated_at "set by Model"
+    }
     COUNTERS {
-        string _id "'alumni', 'announcements' or 'job_postings'"
+        string _id "'alumni', 'announcements', 'job_postings' or 'job_applications'"
         int seq "last assigned id"
     }
     ALUMNI ||--o{ ANNOUNCEMENTS : "author_id"
     ALUMNI ||--o{ JOB_POSTINGS : "author_id"
+    ALUMNI ||--o{ JOB_APPLICATIONS : "alumni_id"
+    JOB_POSTINGS ||--o{ JOB_APPLICATIONS : "job_posting_id"
     COUNTERS ||--o{ ALUMNI : "assigns _id"
     COUNTERS ||--o{ ANNOUNCEMENTS : "assigns _id"
     COUNTERS ||--o{ JOB_POSTINGS : "assigns _id"
+    COUNTERS ||--o{ JOB_APPLICATIONS : "assigns _id"
 ```
