@@ -50,6 +50,10 @@ fn read_string(doc: &Document, key: &str, what: &str) -> Result<String, ModelErr
     doc.get_str(key).map_err(|_| corrupt(what)).map(str::to_owned)
 }
 
+fn read_bool(doc: &Document, key: &str, what: &str) -> Result<bool, ModelError> {
+    doc.get_bool(key).map_err(|_| corrupt(what))
+}
+
 fn read_time(doc: &Document, key: &str, what: &str) -> Result<String, ModelError> {
     doc.get_datetime(key)
         .map_err(|_| corrupt(what))?
@@ -155,6 +159,73 @@ pub struct UpdateAnnouncement {
     pub author_id: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct JobPosting {
+    #[serde(rename = "_id")]
+    pub id: u64,
+    pub title: String,
+    pub company: String,
+    pub description: String,
+    pub location: String,
+    pub employment_type: String,
+    pub apply_url: String,
+    pub author_id: u64,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl JobPosting {
+    pub fn from_doc(doc: &Document) -> Result<Self, ModelError> {
+        Ok(Self {
+            id: read_u64(doc, "_id", "job posting")?,
+            title: read_string(doc, "title", "job posting")?,
+            company: read_string(doc, "company", "job posting")?,
+            description: read_string(doc, "description", "job posting")?,
+            location: read_string(doc, "location", "job posting")?,
+            employment_type: read_string(doc, "employment_type", "job posting")?,
+            apply_url: read_string(doc, "apply_url", "job posting")?,
+            author_id: read_u64(doc, "author_id", "job posting")?,
+            is_active: read_bool(doc, "is_active", "job posting")?,
+            created_at: read_time(doc, "created_at", "job posting")?,
+            updated_at: read_time(doc, "updated_at", "job posting")?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateJobPosting {
+    pub title: String,
+    pub company: String,
+    pub description: String,
+    pub location: String,
+    pub employment_type: String,
+    pub apply_url: String,
+    pub author_id: u64,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct UpdateJobPosting {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub company: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub employment_type: Option<String>,
+    #[serde(default)]
+    pub apply_url: Option<String>,
+    #[serde(default)]
+    pub author_id: Option<u64>,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+}
+
 pub fn validate_full_name(value: &str) -> Result<(), ModelError> {
     if value.trim().is_empty() {
         return Err(ModelError::Invalid("full_name must not be empty"));
@@ -198,6 +269,47 @@ pub fn validate_title(value: &str) -> Result<(), ModelError> {
 pub fn validate_body(value: &str) -> Result<(), ModelError> {
     if value.trim().is_empty() {
         return Err(ModelError::Invalid("body must not be empty"));
+    }
+    Ok(())
+}
+
+pub fn validate_company(value: &str) -> Result<(), ModelError> {
+    if value.trim().is_empty() {
+        return Err(ModelError::Invalid("company must not be empty"));
+    }
+    Ok(())
+}
+
+pub fn validate_description(value: &str) -> Result<(), ModelError> {
+    if value.trim().is_empty() {
+        return Err(ModelError::Invalid("description must not be empty"));
+    }
+    Ok(())
+}
+
+pub fn validate_location(value: &str) -> Result<(), ModelError> {
+    if value.trim().is_empty() {
+        return Err(ModelError::Invalid("location must not be empty"));
+    }
+    Ok(())
+}
+
+pub fn validate_employment_type(value: &str) -> Result<(), ModelError> {
+    if value.trim().is_empty() {
+        return Err(ModelError::Invalid("employment_type must not be empty"));
+    }
+    Ok(())
+}
+
+pub fn validate_apply_url(value: &str) -> Result<(), ModelError> {
+    let url = value.trim();
+    if url.is_empty() {
+        return Err(ModelError::Invalid("apply_url must not be empty"));
+    }
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(ModelError::Invalid(
+            "apply_url must start with http:// or https://",
+        ));
     }
     Ok(())
 }
@@ -265,5 +377,34 @@ mod tests {
     fn cleaning_trims_and_lowercases_email() {
         assert_eq!(clean_name("  Ada  "), "Ada");
         assert_eq!(clean_email("Ada@Example.COM "), "ada@example.com");
+    }
+
+    #[test]
+    fn job_posting_fields_reject_blank() {
+        for result in [
+            validate_title(" "),
+            validate_company(""),
+            validate_description("  "),
+            validate_location(""),
+            validate_employment_type(" "),
+        ] {
+            assert!(matches!(result, Err(ModelError::Invalid(_))));
+        }
+        assert!(validate_company("Acme").is_ok());
+        assert!(validate_description("Build things").is_ok());
+        assert!(validate_location("Remote").is_ok());
+        assert!(validate_employment_type("Full-time").is_ok());
+    }
+
+    #[test]
+    fn apply_url_needs_http_prefix() {
+        assert!(validate_apply_url("https://example.com/jobs/1").is_ok());
+        assert!(validate_apply_url("http://example.com").is_ok());
+        for bad in ["", "ftp://example.com", "example.com", "//example.com"] {
+            assert!(
+                matches!(validate_apply_url(bad), Err(ModelError::Invalid(_))),
+                "{bad} must fail"
+            );
+        }
     }
 }

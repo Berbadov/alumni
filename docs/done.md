@@ -2,6 +2,28 @@
 
 Completed work log, newest first.
 
+## 2026-10-21 — Job postings: schema, migration, and JSON CRUD
+- `docs/ddd.md`: new `job_postings` collection. Fields: `title`, `company`,
+  `description`, `location`, `employment_type`, `apply_url`, `author_id`,
+  `is_active`, `created_at`, `updated_at`. `author_id` links to `alumni._id`
+  and blocks alumni delete. Counters and the ER diagram include the collection.
+- `services/alumni-api/migrations/001_add_job_postings.js`: idempotent
+  `mongosh` migration. It creates the collection, the `author_id` and
+  `is_active` indexes, and the `job_postings` counter. The counter uses
+  `$setOnInsert` and starts from the largest existing `_id` to prevent
+  duplicate ids.
+- `alumni-api`: `JobPosting`, `CreateJobPosting`, and `UpdateJobPosting` in
+  `models.rs`, with trim, non-empty, URL-prefix, and author checks.
+  `JobPostingStore` runs the MongoDB CRUD on the `job_postings` counter.
+- `ApiJobPostingController` serves JSON CRUD under `/api/v1/job-postings`.
+  `is_active` defaults to `true`. `?active=true|false` filters the list.
+  Unknown `author_id` fails with 400. Startup creates both indexes.
+  Swagger lists the six operations under `ApiJobPostingController`.
+- Delete of an alumni record with job postings fails with 400.
+- Tests: 30 pass (2 new model tests, 4 new route tests). Clippy passes with
+  `-D warnings`. Verified in Docker (`rust:1.98`) against `mongo:7`.
+- Open: frontend job posting page.
+
 ## 2026-10-14 — MongoDB migration per `docs/ddd.md`
 - `users` merges into `alumni`. `UserStore`, `UserController`,
   `ApiUserController`, the `/users` pages, and the `/api/v1/users` plus

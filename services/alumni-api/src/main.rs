@@ -6,12 +6,16 @@ mod config;
 mod controllers;
 mod error;
 mod handlers;
+mod job_posting_store;
 mod models;
 mod routes;
 mod views;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
-use controllers::{announcement_controller, api_alumni_controller, api_announcement_controller};
+use controllers::{
+    announcement_controller, api_alumni_controller, api_announcement_controller,
+    api_job_posting_controller,
+};
 use mongodb::bson::doc;
 use mongodb::options::ClientOptions;
 use mongodb::{Client, IndexModel};
@@ -20,18 +24,20 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use alumni_store::AlumniStore;
 use announcement_store::AnnouncementStore;
+use job_posting_store::JobPostingStore;
 
 #[derive(OpenApi)]
 #[openapi(
     info(
         title = "alumni-api",
         version = "0.1.0",
-        description = "Alumni records (JSON) and announcement pages (HTML) with their REST API (JSON)."
+        description = "Alumni records (JSON), announcement pages (HTML), job postings (JSON), and their REST APIs."
     ),
     tags(
         (name = "ApiAlumniController", description = "JSON alumni CRUD under /api/v1/alumni"),
         (name = "AnnouncementController", description = "HTML pages under /announcements: list, create, show, edit, update, delete"),
         (name = "ApiAnnouncementController", description = "JSON announcement CRUD under /api/v1/announcements (alias: /api/announcements)"),
+        (name = "ApiJobPostingController", description = "JSON job posting CRUD under /api/v1/job-postings"),
     ),
     paths(
         handlers::health,
@@ -53,6 +59,12 @@ use announcement_store::AnnouncementStore;
         api_announcement_controller::replace,
         api_announcement_controller::update,
         api_announcement_controller::delete,
+        api_job_posting_controller::create,
+        api_job_posting_controller::list,
+        api_job_posting_controller::get,
+        api_job_posting_controller::replace,
+        api_job_posting_controller::update,
+        api_job_posting_controller::delete,
     ),
     components(schemas(
         models::Alumni,
@@ -61,6 +73,9 @@ use announcement_store::AnnouncementStore;
         models::Announcement,
         models::CreateAnnouncement,
         models::UpdateAnnouncement,
+        models::JobPosting,
+        models::CreateJobPosting,
+        models::UpdateJobPosting,
         handlers::Health
     ))
 )]
@@ -70,6 +85,7 @@ struct ApiDoc;
 pub struct AppState {
     pub alumni: AlumniStore,
     pub announcements: AnnouncementStore,
+    pub job_postings: JobPostingStore,
 }
 
 fn io_error(err: impl std::fmt::Display) -> std::io::Error {
@@ -108,10 +124,27 @@ async fn main() -> std::io::Result<()> {
         )
         .await
         .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("job_postings")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "author_id": 1 })
+                .build(),
+        )
+        .await
+        .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("job_postings")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "is_active": 1 })
+                .build(),
+        )
+        .await
+        .map_err(io_error)?;
 
     let state = web::Data::new(AppState {
         alumni: AlumniStore::new(&db),
         announcements: AnnouncementStore::new(&db),
+        job_postings: JobPostingStore::new(&db),
     });
 
     let server = HttpServer::new(move || {

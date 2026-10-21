@@ -1,13 +1,15 @@
 pub mod announcement;
 pub mod api_alumni;
 pub mod api_announcement;
+pub mod api_job_posting;
 
 use actix_web::web;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.configure(api_alumni::configure)
         .configure(announcement::configure)
-        .configure(api_announcement::configure);
+        .configure(api_announcement::configure)
+        .configure(api_job_posting::configure);
 }
 
 #[cfg(test)]
@@ -27,7 +29,8 @@ mod tests {
     use super::configure;
     use crate::alumni_store::AlumniStore;
     use crate::announcement_store::AnnouncementStore;
-    use crate::models::{Alumni, Announcement};
+    use crate::job_posting_store::JobPostingStore;
+    use crate::models::{Alumni, Announcement, JobPosting};
     use crate::AppState;
 
     static TEST_DB_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -58,10 +61,19 @@ mod tests {
             .create_index(IndexModel::builder().keys(doc! { "author_id": 1 }).build())
             .await
             .unwrap();
+        db.collection::<Document>("job_postings")
+            .create_index(IndexModel::builder().keys(doc! { "author_id": 1 }).build())
+            .await
+            .unwrap();
+        db.collection::<Document>("job_postings")
+            .create_index(IndexModel::builder().keys(doc! { "is_active": 1 }).build())
+            .await
+            .unwrap();
         (
             AppState {
                 alumni: AlumniStore::new(&db),
                 announcements: AnnouncementStore::new(&db),
+                job_postings: JobPostingStore::new(&db),
             },
             name,
         )
@@ -112,6 +124,32 @@ mod tests {
             let req = TestRequest::post()
                 .uri("/api/v1/announcements")
                 .set_json(json!({ "title": "Reunion", "body": "Save the date", "author_id": 1 }))
+                .to_request();
+            assert_eq!(
+                test::call_service(&$app, req).await.status(),
+                StatusCode::CREATED
+            );
+        };
+    }
+
+    fn job_posting_json(title: &str) -> serde_json::Value {
+        json!({
+            "title": title,
+            "company": "Acme",
+            "description": "Build things",
+            "location": "Remote",
+            "employment_type": "Full-time",
+            "apply_url": "https://example.com/jobs/1",
+            "author_id": 1,
+        })
+    }
+
+    macro_rules! seed_job_posting {
+        ($app:expr) => {
+            seed_alumni!($app);
+            let req = TestRequest::post()
+                .uri("/api/v1/job-postings")
+                .set_json(job_posting_json("Rust Engineer"))
                 .to_request();
             assert_eq!(
                 test::call_service(&$app, req).await.status(),
@@ -409,6 +447,202 @@ mod tests {
         )
         .await;
         assert_eq!(announcements.len(), 1);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn job_posting_create_get_patch_put_delete_lifecycle() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        let req = TestRequest::post()
+            .uri("/api/v1/job-postings")
+            .set_json(json!({
+                "title": "  Rust Engineer  ",
+                "company": "  Acme  ",
+                "description": "  Build APIs  ",
+                "location": "  Remote  ",
+                "employment_type": "  Full-time  ",
+                "apply_url": "  https://example.com/jobs/1  ",
+                "author_id": 1,
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created: JobPosting = test::read_body_json(resp).await;
+        assert_eq!(created.id, 1);
+        assert_eq!(created.title, "Rust Engineer");
+        assert_eq!(created.company, "Acme");
+        assert_eq!(created.description, "Build APIs");
+        assert_eq!(created.location, "Remote");
+        assert_eq!(created.employment_type, "Full-time");
+        assert_eq!(created.apply_url, "https://example.com/jobs/1");
+        assert_eq!(created.author_id, 1);
+        assert!(created.is_active);
+
+        let uri = "/api/v1/job-postings/1";
+        let posting: JobPosting = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri(uri).to_request(),
+        )
+        .await;
+        assert_eq!(posting.title, "Rust Engineer");
+
+        let req = TestRequest::patch()
+            .uri(uri)
+            .set_json(json!({ "title": "Backend Engineer", "is_active": false }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let patched: JobPosting = test::read_body_json(resp).await;
+        assert_eq!(patched.title, "Backend Engineer");
+        assert!(!patched.is_active);
+        assert_eq!(patched.company, "Acme");
+
+        let req = TestRequest::put()
+            .uri(uri)
+            .set_json(job_posting_json("Platform Engineer"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let replaced: JobPosting = test::read_body_json(resp).await;
+        assert_eq!(replaced.title, "Platform Engineer");
+        assert!(replaced.is_active);
+
+        let resp = test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        let resp = test::call_service(&app, TestRequest::get().uri(uri).to_request()).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn job_posting_list_returns_id_order_and_filters_active() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        for (title, active) in [("Active", true), ("Inactive", false)] {
+            let mut body = job_posting_json(title);
+            body["is_active"] = json!(active);
+            let req = TestRequest::post()
+                .uri("/api/v1/job-postings")
+                .set_json(body)
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::CREATED);
+        }
+
+        let all: Vec<JobPosting> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri("/api/v1/job-postings").to_request(),
+        )
+        .await;
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].title, "Active");
+        assert_eq!(all[1].title, "Inactive");
+
+        let active: Vec<JobPosting> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/job-postings?active=true")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].title, "Active");
+
+        let inactive: Vec<JobPosting> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/job-postings?active=false")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(inactive.len(), 1);
+        assert_eq!(inactive[0].title, "Inactive");
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn job_posting_rejects_invalid_input() {
+        let (app, db) = test_app!();
+        seed_job_posting!(app);
+
+        for (field, value) in [
+            ("title", json!("")),
+            ("company", json!("  ")),
+            ("description", json!("")),
+            ("location", json!("")),
+            ("employment_type", json!(" ")),
+            ("apply_url", json!("")),
+            ("apply_url", json!("ftp://example.com")),
+            ("author_id", json!(999)),
+        ] {
+            let mut body = job_posting_json("Engineer");
+            body[field] = value;
+            let req = TestRequest::post()
+                .uri("/api/v1/job-postings")
+                .set_json(&body)
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{field}");
+        }
+
+        let req = TestRequest::patch()
+            .uri("/api/v1/job-postings/1")
+            .set_json(json!({ "apply_url": "example.com" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let req = TestRequest::patch()
+            .uri("/api/v1/job-postings/1")
+            .set_json(json!({ "author_id": 999 }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let req = TestRequest::patch()
+            .uri("/api/v1/job-postings/999")
+            .set_json(json!({ "title": "Ghost" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn alumni_delete_with_job_postings_fails_until_they_go() {
+        let (app, db) = test_app!();
+        seed_job_posting!(app);
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete()
+                .uri("/api/v1/job-postings/1")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
         cleanup(&db).await;
     }

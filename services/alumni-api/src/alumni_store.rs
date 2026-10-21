@@ -22,6 +22,7 @@ fn write_error(err: mongodb::error::Error) -> ModelError {
 pub struct AlumniStore {
     alumni: Collection<Document>,
     announcements: Collection<Document>,
+    job_postings: Collection<Document>,
     counters: Collection<Document>,
 }
 
@@ -30,6 +31,7 @@ impl AlumniStore {
         Self {
             alumni: db.collection("alumni"),
             announcements: db.collection("announcements"),
+            job_postings: db.collection("job_postings"),
             counters: db.collection("counters"),
         }
     }
@@ -162,6 +164,14 @@ impl AlumniStore {
             .map_err(ModelError::internal)?;
         if used > 0 {
             return Err(ModelError::Blocked("alumni has announcements"));
+        }
+        let used = self
+            .job_postings
+            .count_documents(doc! { "author_id": key })
+            .await
+            .map_err(ModelError::internal)?;
+        if used > 0 {
+            return Err(ModelError::Blocked("alumni has job postings"));
         }
         let deleted = self
             .alumni
