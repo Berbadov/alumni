@@ -2,6 +2,30 @@
 
 Completed work log, newest first.
 
+## 2026-10-23 — Job postings UI
+- `frontend`: new `/jobs` page (`src/pages/Jobs.tsx`). The table lists job
+  postings with All, Active, and Inactive filters. Each row has Apply, Edit,
+  Deactivate or Activate, and Delete. The list calls
+  `GET /api/v1/job-postings` with `?active=true|false` for the filtered views.
+- `src/components/JobPostingForm.tsx`: one form for create and edit. Fields:
+  title, company, location, employment type, author, apply URL, description,
+  and active. The author picker loads `/api/v1/alumni`, so a posting cannot
+  send an unknown `author_id`. Create uses `POST`; edit sends `PUT` with every
+  field; the active toggle sends `PATCH {is_active}`.
+- `src/api.ts` and `src/types.ts`: typed `JobPosting` and `JobPostingInput`,
+  the job posting client calls, and backend `{"error": ...}` messages shown on
+  the page.
+- Navigation: `Jobs` link in `Layout.tsx`, `/jobs` route in `App.tsx`, and a
+  `Browse jobs` button on Home.
+- Styling: form fields use `border-foreground/25` and `bg-background/40` so the
+  borders stay visible on the card in both themes. `color-scheme` is set for
+  native controls. The shared `Input` component gets the same field style.
+- Verified: `npm run build` passes; `docker compose up --build` serves `/jobs`
+  with status 200. With three sample rows (2 active, 1 inactive), the filter
+  counts were 3/2/1. A headless Chrome (CDP) run created, filtered, edited,
+  deactivated, and deleted a posting, and reported no console errors. The page
+  was checked in light and dark themes.
+
 ## 2026-10-21 — Job postings: schema, migration, and JSON CRUD
 - `docs/ddd.md`: new `job_postings` collection. Fields: `title`, `company`,
   `description`, `location`, `employment_type`, `apply_url`, `author_id`,

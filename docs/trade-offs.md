@@ -2,6 +2,16 @@
 
 Decisions and compromises, with rationale.
 
+## Job postings UI: one page, author picker, full-replace edit
+The `/jobs` page is one table plus one create/edit form. The author is a picker
+loaded from `/api/v1/alumni`. This adds a second request and couples the page to
+alumni, but it prevents the 400 that a free numeric id invites and shows a name
+instead of `author_id`. Edit sends `PUT` with every field because that endpoint
+replaces the whole posting; activate/deactivate sends `PATCH {is_active}` so a
+status change does not resend the form. Delete uses `window.confirm`; a dialog
+component is deferred. Cost: no pagination, no detail route, and the list
+reloads after each write.
+
 ## Job postings: mongosh migration, API-only CRUD, counter seeded from the largest id
 The repo has no migration tool yet, so `job_postings` ships as an idempotent
 `mongosh` script (`services/alumni-api/migrations/001_add_job_postings.js`).

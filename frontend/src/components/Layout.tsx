@@ -20,6 +20,9 @@ export function Layout() {
             <NavLink to="/alumni" className={navLinkClass}>
               Alumni
             </NavLink>
+            <NavLink to="/jobs" className={navLinkClass}>
+              Jobs
+            </NavLink>
             <NavLink to="/about" className={navLinkClass}>
               About
             </NavLink>

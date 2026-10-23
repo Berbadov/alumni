@@ -151,8 +151,12 @@ The first `up` command fills MongoDB with sample alumni. The `mongo-seed` contai
 
 ## Routes
 
-The SPA has these pages: `/` (home), `/alumni` (list) and `/about` (placeholder with a Prufrock
-poem). For an unknown path, the SPA router shows the 404 page.
+The SPA has these pages: `/` (home), `/alumni` (list), `/jobs` (job postings), and `/about`
+(placeholder with a Prufrock poem). For an unknown path, the SPA router shows the 404 page.
+
+The `/jobs` page lists job postings with All, Active, and Inactive filters. It creates postings
+with `POST`, edits them with `PUT`, activates or deactivates them with `PATCH`, and deletes them
+with `DELETE`. The author picker reads `/api/v1/alumni`. The list reloads after each write.
 
 The API has these routes under `/api/v1`. Use port 8080 for the API or port 80 for the gateway.
 

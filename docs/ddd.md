@@ -213,7 +213,7 @@ docker compose exec mongo mongosh --quiet /tmp/001_add_job_postings.js
 - Pagination cursors for list routes.
 - Stronger email format check.
 - MongoDB `$jsonSchema` validator.
-- Job posting pages and the frontend list.
+- Job posting detail page.
 - `events` collection and `notifications` service.
 - Sessions and password reset flow.
 

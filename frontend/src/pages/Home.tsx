@@ -11,9 +11,14 @@ export function Home() {
         Web Development, Fall 2026&ndash;2027. Browse classmates, their degrees,
         and graduation years.
       </p>
-      <Button asChild size="lg">
-        <Link to="/alumni">Browse alumni</Link>
-      </Button>
+      <div className="flex flex-wrap justify-center gap-3">
+        <Button asChild size="lg">
+          <Link to="/alumni">Browse alumni</Link>
+        </Button>
+        <Button asChild size="lg" variant="outline">
+          <Link to="/jobs">Browse jobs</Link>
+        </Button>
+      </div>
     </div>
   )
 }
