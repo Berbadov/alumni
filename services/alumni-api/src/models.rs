@@ -4,6 +4,7 @@ use utoipa::ToSchema;
 
 pub const MIN_GRADUATION_YEAR: i32 = 1900;
 pub const MAX_GRADUATION_YEAR: i32 = 2100;
+pub const MAX_JOB_TITLE_LEN: usize = 120;
 
 #[derive(Debug, Clone)]
 pub enum ModelError {
@@ -197,8 +198,10 @@ impl JobPosting {
 pub struct CreateJobPosting {
     pub title: String,
     pub company: String,
-    pub description: String,
-    pub location: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
     pub employment_type: String,
     pub apply_url: String,
     pub author_id: u64,
@@ -266,6 +269,14 @@ pub fn validate_title(value: &str) -> Result<(), ModelError> {
     Ok(())
 }
 
+pub fn validate_job_title(value: &str) -> Result<(), ModelError> {
+    validate_title(value)?;
+    if value.trim().chars().count() > MAX_JOB_TITLE_LEN {
+        return Err(ModelError::Invalid("title must be at most 120 characters"));
+    }
+    Ok(())
+}
+
 pub fn validate_body(value: &str) -> Result<(), ModelError> {
     if value.trim().is_empty() {
         return Err(ModelError::Invalid("body must not be empty"));
@@ -276,20 +287,6 @@ pub fn validate_body(value: &str) -> Result<(), ModelError> {
 pub fn validate_company(value: &str) -> Result<(), ModelError> {
     if value.trim().is_empty() {
         return Err(ModelError::Invalid("company must not be empty"));
-    }
-    Ok(())
-}
-
-pub fn validate_description(value: &str) -> Result<(), ModelError> {
-    if value.trim().is_empty() {
-        return Err(ModelError::Invalid("description must not be empty"));
-    }
-    Ok(())
-}
-
-pub fn validate_location(value: &str) -> Result<(), ModelError> {
-    if value.trim().is_empty() {
-        return Err(ModelError::Invalid("location must not be empty"));
     }
     Ok(())
 }
@@ -382,18 +379,24 @@ mod tests {
     #[test]
     fn job_posting_fields_reject_blank() {
         for result in [
-            validate_title(" "),
+            validate_job_title(" "),
             validate_company(""),
-            validate_description("  "),
-            validate_location(""),
             validate_employment_type(" "),
         ] {
             assert!(matches!(result, Err(ModelError::Invalid(_))));
         }
         assert!(validate_company("Acme").is_ok());
-        assert!(validate_description("Build things").is_ok());
-        assert!(validate_location("Remote").is_ok());
         assert!(validate_employment_type("Full-time").is_ok());
+    }
+
+    #[test]
+    fn job_title_rejects_over_120_chars() {
+        assert!(validate_job_title("Rust Engineer").is_ok());
+        assert!(validate_job_title(&"x".repeat(MAX_JOB_TITLE_LEN)).is_ok());
+        assert!(matches!(
+            validate_job_title(&"x".repeat(MAX_JOB_TITLE_LEN + 1)),
+            Err(ModelError::Invalid(_))
+        ));
     }
 
     #[test]

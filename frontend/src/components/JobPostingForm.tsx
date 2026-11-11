@@ -149,6 +149,7 @@ export function JobPostingForm({
               <Input
                 id="posting-title"
                 required
+                maxLength={120}
                 value={values.title}
                 onChange={(e) => set('title', e.target.value)}
               />
@@ -161,10 +162,9 @@ export function JobPostingForm({
                 onChange={(e) => set('company', e.target.value)}
               />
             </Field>
-            <Field id="posting-location" label="Location *">
+            <Field id="posting-location" label="Location">
               <Input
                 id="posting-location"
-                required
                 placeholder="Remote"
                 value={values.location}
                 onChange={(e) => set('location', e.target.value)}
@@ -209,13 +209,12 @@ export function JobPostingForm({
             </Field>
             <Field
               id="posting-description"
-              label="Description *"
+              label="Description"
               className="sm:col-span-2"
             >
               <textarea
                 id="posting-description"
                 className={textareaClass}
-                required
                 value={values.description}
                 onChange={(e) => set('description', e.target.value)}
               />

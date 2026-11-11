@@ -7,9 +7,12 @@ mod controllers;
 mod error;
 mod handlers;
 mod job_posting_store;
+mod middleware;
 mod models;
 mod routes;
 mod views;
+
+use std::path::PathBuf;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use controllers::{
@@ -25,6 +28,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use alumni_store::AlumniStore;
 use announcement_store::AnnouncementStore;
 use job_posting_store::JobPostingStore;
+use middleware::RequestLogger;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -147,10 +151,17 @@ async fn main() -> std::io::Result<()> {
         job_postings: JobPostingStore::new(&db),
     });
 
+    let error_log = PathBuf::from(&cfg.error_log);
+    if let Some(parent) = error_log.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
     let server = HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
             .wrap(Logger::default())
+            .wrap(RequestLogger::new(error_log.clone()))
+            .default_service(web::route().to(middleware::not_found))
             .service(
                 SwaggerUi::new("/api/swagger/{_:.*}")
                     .url("/api/openapi.json", ApiDoc::openapi()),

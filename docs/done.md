@@ -2,6 +2,31 @@
 
 Completed work log, newest first.
 
+## 2026-11-11 — Request logging, 404 guardian, error log, JobPosting rules
+- `services/alumni-api/src/middleware.rs` (new): `RequestLogger` middleware prints one
+  line per request on the terminal: `HH:MM:SS METHOD PATH STATUS DURATIONms`
+  (example: `10:15:30 POST /api/v1/job-postings 201 18ms`). Responses with status 400
+  or higher also append the same line to the error log file (`ERROR_LOG`, default
+  `logs/error.log`). Compose mounts the `api-logs` volume at `/app/logs`.
+- 404 guardian: `default_service` sends unmatched routes to `middleware::not_found`.
+  Paths under `/api` get status 404 with JSON `{"error": "no route matches GET /api/nope"}`;
+  every other path gets the generic HTML 404 page (`views/error.rs`).
+- JobPosting rules in `models.rs` and `ddd.md`: `title` required, max 120 characters
+  (`MAX_JOB_TITLE_LEN`, `validate_job_title`); `company` required; `description` and
+  `location` optional (`Option<String>` on `CreateJobPosting`, stored as empty strings
+  when absent). `JobPostingStore` validates with the new rules on create, replace, and
+  patch.
+- Invalid requests exercised against the API: blank title, title over 120 characters,
+  blank company, bad `apply_url`, unknown `author_id`, and unknown routes. They return
+  400 with the reason or 404 with `no route matches ...` (model and middleware unit
+  tests cover these without MongoDB).
+- Frontend: unknown SPA paths redirect to `/404` (`App.tsx`); the posting form makes
+  Location and Description optional and caps Title at 120 characters (`maxLength`).
+- Tests: 12 model/middleware unit tests pass; `cargo clippy --all-targets -- -D warnings`
+  clean; `cargo build` clean; `npm run build` passes. The route tests need MongoDB on
+  `localhost:27017`; the Docker daemon was down in this environment, so they were not
+  run here.
+
 ## 2026-10-23 — Job postings UI
 - `frontend`: new `/jobs` page (`src/pages/Jobs.tsx`). The table lists job
   postings with All, Active, and Inactive filters. Each row has Apply, Edit,

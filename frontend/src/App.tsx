@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Home } from '@/pages/Home'
 import { Alumni } from '@/pages/Alumni'
@@ -14,7 +14,8 @@ export function App() {
         <Route path="alumni" element={<Alumni />} />
         <Route path="jobs" element={<Jobs />} />
         <Route path="about" element={<About />} />
-        <Route path="*" element={<NotFound />} />
+        <Route path="404" element={<NotFound />} />
+        <Route path="*" element={<Navigate to="/404" replace />} />
       </Route>
     </Routes>
   )

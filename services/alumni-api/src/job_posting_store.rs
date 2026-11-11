@@ -5,8 +5,7 @@ use mongodb::{Collection, Database};
 
 use crate::models::{
     CreateJobPosting, JobPosting, ModelError, UpdateJobPosting, clean_name, validate_apply_url,
-    validate_company, validate_description, validate_employment_type, validate_location,
-    validate_title,
+    validate_company, validate_employment_type, validate_job_title,
 };
 
 #[derive(Debug, Clone)]
@@ -52,10 +51,8 @@ impl JobPostingStore {
     }
 
     fn validate(input: &CreateJobPosting) -> Result<(), ModelError> {
-        validate_title(&input.title)?;
+        validate_job_title(&input.title)?;
         validate_company(&input.company)?;
-        validate_description(&input.description)?;
-        validate_location(&input.location)?;
         validate_employment_type(&input.employment_type)?;
         validate_apply_url(&input.apply_url)
     }
@@ -70,8 +67,8 @@ impl JobPostingStore {
                 "_id": i64::try_from(id).map_err(ModelError::internal)?,
                 "title": clean_name(&input.title),
                 "company": clean_name(&input.company),
-                "description": clean_name(&input.description),
-                "location": clean_name(&input.location),
+                "description": clean_name(input.description.as_deref().unwrap_or_default()),
+                "location": clean_name(input.location.as_deref().unwrap_or_default()),
                 "employment_type": clean_name(&input.employment_type),
                 "apply_url": clean_name(&input.apply_url),
                 "author_id": author,
@@ -129,8 +126,8 @@ impl JobPostingStore {
                 doc! { "$set": {
                     "title": clean_name(&input.title),
                     "company": clean_name(&input.company),
-                    "description": clean_name(&input.description),
-                    "location": clean_name(&input.location),
+                    "description": clean_name(input.description.as_deref().unwrap_or_default()),
+                    "location": clean_name(input.location.as_deref().unwrap_or_default()),
                     "employment_type": clean_name(&input.employment_type),
                     "apply_url": clean_name(&input.apply_url),
                     "author_id": author,
@@ -153,7 +150,7 @@ impl JobPostingStore {
     ) -> Result<JobPosting, ModelError> {
         let mut set = Document::new();
         if let Some(title) = &input.title {
-            validate_title(title)?;
+            validate_job_title(title)?;
             set.insert("title", clean_name(title));
         }
         if let Some(company) = &input.company {
@@ -161,11 +158,9 @@ impl JobPostingStore {
             set.insert("company", clean_name(company));
         }
         if let Some(description) = &input.description {
-            validate_description(description)?;
             set.insert("description", clean_name(description));
         }
         if let Some(location) = &input.location {
-            validate_location(location)?;
             set.insert("location", clean_name(location));
         }
         if let Some(employment_type) = &input.employment_type {

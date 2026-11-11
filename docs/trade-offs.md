@@ -2,6 +2,20 @@
 
 Decisions and compromises, with rationale.
 
+## Request logger middleware, error log file, and the 404 guardian
+The terminal line `time | method | route | status | duration` comes from a custom
+`RequestLogger` middleware (`middleware.rs`), not from actix `Logger` format codes,
+so the line matches the requested format exactly (`10:15:30 POST /api/job 201 18ms`).
+The default `Logger` stays on the app per `AGENTS.md`. Error responses (status 400
+or higher) also append to `logs/error.log` (`ERROR_LOG`); in Compose the file lives
+on the `api-logs` volume, so it survives container restarts, while a host run writes
+to a relative `logs/` path. The 404 guardian is `default_service`, not a
+response-rewriting middleware: inside `wrap` an unmatched route cannot be told apart
+from a handler's own 404, and `default_service` only sees unmatched routes, so
+handler 404s keep their JSON body. API paths get JSON with a reason; other paths get
+the generic HTML 404 page. The SPA redirects unknown paths to `/404` instead of
+rendering the 404 page in place, so the address bar always shows `/404`.
+
 ## Job postings UI: one page, author picker, full-replace edit
 The `/jobs` page is one table plus one create/edit form. The author is a picker
 loaded from `/api/v1/alumni`. This adds a second request and couples the page to

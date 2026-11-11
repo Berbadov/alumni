@@ -36,6 +36,9 @@ services:
       MONGO_DB: ${MONGO_DB:-alumni}
       BIND_ADDR: ${BIND_ADDR:-0.0.0.0:8080}
       RUST_LOG: ${RUST_LOG:-info}
+      ERROR_LOG: ${ERROR_LOG:-/app/logs/error.log}
+    volumes:
+      - api-logs:/app/logs
     ports:
       - "8080:8080"
     depends_on:
@@ -53,3 +56,4 @@ services:
 
 volumes:
   mongo-data:
+  api-logs:

@@ -574,9 +574,8 @@ mod tests {
 
         for (field, value) in [
             ("title", json!("")),
+            ("title", json!("x".repeat(121))),
             ("company", json!("  ")),
-            ("description", json!("")),
-            ("location", json!("")),
             ("employment_type", json!(" ")),
             ("apply_url", json!("")),
             ("apply_url", json!("ftp://example.com")),
@@ -601,6 +600,13 @@ mod tests {
 
         let req = TestRequest::patch()
             .uri("/api/v1/job-postings/1")
+            .set_json(json!({ "title": "x".repeat(121) }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let req = TestRequest::patch()
+            .uri("/api/v1/job-postings/1")
             .set_json(json!({ "author_id": 999 }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -612,6 +618,43 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn job_posting_description_and_location_are_optional() {
+        let (app, db) = test_app!();
+        seed_alumni!(app);
+
+        let req = TestRequest::post()
+            .uri("/api/v1/job-postings")
+            .set_json(json!({
+                "title": "Minimal posting",
+                "company": "Acme",
+                "employment_type": "Contract",
+                "apply_url": "https://example.com/jobs/2",
+                "author_id": 1,
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created: JobPosting = test::read_body_json(resp).await;
+        assert_eq!(created.description, "");
+        assert_eq!(created.location, "");
+
+        let mut body = job_posting_json("Blank optional fields");
+        body["description"] = json!("");
+        body["location"] = json!("  ");
+        let req = TestRequest::post()
+            .uri("/api/v1/job-postings")
+            .set_json(body)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created: JobPosting = test::read_body_json(resp).await;
+        assert_eq!(created.description, "");
+        assert_eq!(created.location, "");
 
         cleanup(&db).await;
     }

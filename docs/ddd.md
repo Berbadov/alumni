@@ -87,10 +87,10 @@ One document per job offer. The `alumni-model` crate will hold this struct.
 | Field | BSON type | Rust type | Required | Rule |
 | --- | --- | --- | --- | --- |
 | `_id` | int64 | u64, range `1..=i64::MAX` | yes | Server counter assigns it. Never reuse it. |
-| `title` | string | String | yes | Trim it. Reject empty. |
+| `title` | string | String | yes | Trim it. Reject empty. At most 120 characters. |
 | `company` | string | String | yes | Trim it. Reject empty. |
-| `description` | string | String | yes | Trim it. Reject empty. |
-| `location` | string | String | yes | Trim it. Reject empty. Use `"Remote"` for remote work. |
+| `description` | string | String | no | Optional. Trim it. Absent stores as an empty string. |
+| `location` | string | String | no | Optional. Trim it. Use `"Remote"` for remote work. Absent stores as an empty string. |
 | `employment_type` | string | String | yes | Trim it. Reject empty. Free text, no enum yet. |
 | `apply_url` | string | String | yes | Trim it. Reject empty. Must start with `http://` or `https://`. |
 | `author_id` | int64 | u64 | yes | Must equal an existing `alumni._id`. |
@@ -100,6 +100,9 @@ One document per job offer. The `alumni-model` crate will hold this struct.
 
 Rules:
 
+- `title` is required and at most 120 characters. `company` is required.
+  `description` and `location` are optional; the Model stores an empty string
+  when a request omits them.
 - `author_id` links the posting to the alumni record that publishes it.
 - Delete of an alumni row with job postings fails with status `400`.
   The Model checks `job_postings` by `author_id` before it deletes.

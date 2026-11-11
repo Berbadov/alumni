@@ -101,6 +101,8 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 | Controller | `ApiJobPostingController`: functions for the job posting JSON CRUD | `services/alumni-api/src/controllers/api_job_posting_controller.rs` |
 | Controller | Route tables: `api_alumni.rs` (JSON), `announcement.rs` (pages), `api_announcement.rs` (JSON), and `api_job_posting.rs` (JSON) | `services/alumni-api/src/routes/` |
 | Controller | Error type and HTTP status mapping `ApiError` | `services/alumni-api/src/error.rs` |
+| Middleware | Request logger (terminal line plus error log file) and the 404 guardian | `services/alumni-api/src/middleware.rs` |
+| View | Generic HTML 404 page for unmatched non-API routes | `services/alumni-api/src/views/error.rs` |
 | Controller | Stores, `/api/v1` scope, indexes, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
 | View | HTML pages for announcements (maud templates) | `services/alumni-api/src/views/` |
 | View | JSON responses that the API returns | Serde derive on the Model structs |
@@ -152,7 +154,8 @@ The first `up` command fills MongoDB with sample alumni. The `mongo-seed` contai
 ## Routes
 
 The SPA has these pages: `/` (home), `/alumni` (list), `/jobs` (job postings), and `/about`
-(placeholder with a Prufrock poem). For an unknown path, the SPA router shows the 404 page.
+(placeholder with a Prufrock poem). For an unknown path, the SPA redirects to `/404`
+and shows the 404 page.
 
 The `/jobs` page lists job postings with All, Active, and Inactive filters. It creates postings
 with `POST`, edits them with `PUT`, activates or deactivates them with `PATCH`, and deletes them
@@ -202,11 +205,13 @@ Each announcement links to an alumni record through `author_id`. An unknown
 `author_id`. An unknown `author_id` fails with status 400. `is_active`
 defaults to `true`; use `GET /api/v1/job-postings?active=true` to hide
 inactive rows. Delete of an alumni record with job postings fails with
-status 400.
+status 400. Validation rules: `title` is required and at most 120
+characters, `company` is required, and `description` and `location` are
+optional (absent values store as empty strings).
 
 | Route | Returns |
 | --- | --- |
-| `POST /api/v1/job-postings` | The new job posting (status 201). Fields: `title`, `company`, `description`, `location`, `employment_type`, `apply_url`, `author_id`, optional `is_active` |
+| `POST /api/v1/job-postings` | The new job posting (status 201). Fields: `title` (required, max 120 characters), `company` (required), `employment_type`, `apply_url`, `author_id`, optional `description`, `location`, `is_active` |
 | `GET /api/v1/job-postings` | All job postings, ordered by id. Optional query: `active=true` or `active=false` |
 | `GET /api/v1/job-postings/{id}` | One job posting, or status 404 |
 | `PUT /api/v1/job-postings/{id}` | Full replacement, or status 404 |
@@ -236,6 +241,20 @@ http://localhost/api/swagger. The gateway proxies `/announcements` to the API.
 The gateway on port 80 proxies these short routes to the API: `/hello`, `/hello/{variable}` and
 `/sum/{num1}/{num2}`. They return the same responses as the routes without the `/api/v1` prefix.
 See `docs/trade-offs.md`.
+
+## Middleware, logs and errors
+
+- The request logger middleware prints one line per request on the terminal:
+  `HH:MM:SS METHOD PATH STATUS DURATIONms`. Example:
+  `10:15:30 POST /api/v1/job-postings 201 18ms`.
+- Responses with status 400 or higher also append the same line to the error log
+  file `logs/error.log` (env `ERROR_LOG`). Docker Compose mounts the `api-logs`
+  volume at `/app/logs`, so the file survives container restarts.
+- The 404 guardian (`default_service` in `services/alumni-api/src/middleware.rs`)
+  answers unmatched routes with status 404 and a reason: JSON
+  `{"error": "no route matches GET /api/nope"}` under `/api`, and the generic
+  HTML 404 page for every other path.
+- The SPA redirects unknown paths to `/404`.
 
 ## Documentation
 
