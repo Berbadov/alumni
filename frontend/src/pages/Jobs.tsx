@@ -7,10 +7,10 @@ import {
 } from '@/api'
 import { JobPostingForm } from '@/components/JobPostingForm'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -157,115 +157,173 @@ export function Jobs() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Job postings</h1>
-          <p className="text-muted-foreground">
-            Offers published by alumni. Filter by status, then edit or
-            deactivate a posting.
+    <div>
+      {/* 03 — Paper header. The drifting grid is this view's one ambient loop. */}
+      <section aria-labelledby="jobs-heading" className="relative overflow-hidden bg-white">
+        <div
+          aria-hidden="true"
+          className="grid-live pointer-events-none absolute inset-0 opacity-[0.06]"
+        />
+        <div className="relative mx-auto w-full max-w-[1280px] px-6 md:px-12">
+          <p className="type-label border-b border-line py-6 text-ink-muted">
+            03 / OFFERS
+          </p>
+
+          <div className="grid gap-10 py-12 md:grid-cols-12 md:py-16">
+            <div className="reveal md:col-span-7">
+              <h1 id="jobs-heading" className="type-h1 text-ink">
+                Job <em className="font-normal italic text-mulberry">postings</em>.
+              </h1>
+              <p className="type-lede mt-6 max-w-[52ch] text-ink-muted">
+                Offers published by alumni. Filter by status, then edit or
+                deactivate a posting.
+              </p>
+            </div>
+
+            <div className="flex flex-col items-start gap-4 md:col-span-5 md:items-end md:pt-2">
+              <Button onClick={openCreate}>New posting</Button>
+              <p className="type-label text-left text-ink-muted md:text-right">
+                OPEN / ACTIVE / INACTIVE
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="mx-auto w-full max-w-[1280px] space-y-8 px-6 py-10 md:px-12 md:py-14">
+        {error ? (
+          <div role="alert" className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="type-label text-destructive">Error</span>
+            <span className="type-ui text-destructive">{error}</span>
+          </div>
+        ) : null}
+
+        {notice ? (
+          <div
+            role="status"
+            className="flex items-start gap-3 rounded-plate border border-line-strong bg-white px-4 py-3"
+          >
+            <span className="live-dot mt-1.5" aria-hidden="true" />
+            <p className="type-ui text-ink">{notice}</p>
+          </div>
+        ) : null}
+
+        {formOpen ? (
+          <JobPostingForm
+            key={editing?._id ?? 'new'}
+            posting={editing}
+            alumni={alumni}
+            alumniLoading={alumniLoading}
+            onCancel={closeForm}
+            onSaved={handleSaved}
+          />
+        ) : null}
+
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div
+            className="flex flex-wrap gap-2"
+            role="group"
+            aria-label="Filter by status"
+          >
+            {FILTERS.map((option) => (
+              <Button
+                key={option.value}
+                size="sm"
+                variant="outline"
+                aria-pressed={filter === option.value}
+                onClick={() => setFilter(option.value)}
+                className={
+                  filter === option.value
+                    ? 'border-ink bg-ink text-white hover:border-ink hover:bg-ink'
+                    : undefined
+                }
+              >
+                <span className="type-label">{option.label}</span>
+              </Button>
+            ))}
+          </div>
+          <p className="type-data tabular-nums text-ink-muted">
+            {postings.length} {postings.length === 1 ? 'posting' : 'postings'}
           </p>
         </div>
-        <Button onClick={openCreate}>New posting</Button>
-      </div>
 
-      {error ? (
-        <p role="alert" className="text-destructive">
-          Error: {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p
-          role="status"
-          className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-sm"
-        >
-          {notice}
-        </p>
-      ) : null}
+        {loading ? (
+          <div className="rounded-plate border border-line bg-white px-5 py-4">
+            <p className="type-ui text-ink-muted">Loading postings…</p>
+          </div>
+        ) : postings.length === 0 ? (
+          <div className="rounded-plate border border-dotted border-line-strong px-6 py-16 text-center">
+            <p className="type-label text-ink-muted">NO POSTINGS</p>
+            <p className="type-ui mx-auto mt-4 max-w-[46ch] text-ink-muted">
+              No postings in this view;{' '}
+              <Button
+                variant="link"
+                className="h-auto p-0 align-baseline"
+                onClick={openCreate}
+              >
+                create the first one.
+              </Button>
+            </p>
+          </div>
+        ) : (
+          <section aria-label="Postings list" className="rounded-plate border border-line bg-white">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+              <p className="type-label text-ink-muted">05 / LIST</p>
+              <p className="type-label text-ink-muted">
+                SOURCE / ALUMNI POSTINGS &middot; 2026-11-18
+              </p>
+            </div>
 
-      {formOpen ? (
-        <JobPostingForm
-          key={editing?._id ?? 'new'}
-          posting={editing}
-          alumni={alumni}
-          alumniLoading={alumniLoading}
-          onCancel={closeForm}
-          onSaved={handleSaved}
-        />
-      ) : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-2" role="group" aria-label="Filter by status">
-          {FILTERS.map((option) => (
-            <Button
-              key={option.value}
-              size="sm"
-              variant={filter === option.value ? 'default' : 'outline'}
-              aria-pressed={filter === option.value}
-              onClick={() => setFilter(option.value)}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {postings.length} {postings.length === 1 ? 'posting' : 'postings'}
-        </p>
-      </div>
-
-      {loading ? (
-        <p className="text-muted-foreground">Loading job postings…</p>
-      ) : postings.length === 0 ? (
-        <Card>
-          <CardContent className="py-2 text-center text-muted-foreground">
-            No job postings in this view.{' '}
-            <Button variant="link" className="px-1" onClick={openCreate}>
-              Create the first one
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="py-2">
-          <CardContent className="px-2">
-            <Table>
+            <Table className="table-brand">
+              <TableCaption className="sr-only">Job postings</TableCaption>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Author</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead scope="col">Role</TableHead>
+                  <TableHead scope="col">Location</TableHead>
+                  <TableHead scope="col">Type</TableHead>
+                  <TableHead scope="col">Author</TableHead>
+                  <TableHead scope="col">Status</TableHead>
+                  <TableHead scope="col" className="text-right">
+                    Actions
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {postings.map((posting) => (
                   <TableRow key={posting._id}>
                     <TableCell className="whitespace-normal">
-                      <div className="font-medium">{posting.title}</div>
-                      <div className="text-sm text-muted-foreground">
+                      <span className="type-ui font-medium text-ink">
+                        {posting.title}
+                      </span>
+                      <span className="type-ui mt-1 block text-ink-muted">
                         {posting.company}
-                      </div>
+                      </span>
                     </TableCell>
-                    <TableCell>{posting.location}</TableCell>
-                    <TableCell>{posting.employment_type}</TableCell>
-                    <TableCell>
+                    <TableCell className="type-data text-ink">
+                      {posting.location || 'Not recorded.'}
+                    </TableCell>
+                    <TableCell className="type-data text-ink">
+                      {posting.employment_type || 'Not recorded.'}
+                    </TableCell>
+                    <TableCell className="type-data text-ink">
                       {authorNames.get(posting.author_id) ??
                         `Alumni #${posting.author_id}`}
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={
-                          posting.is_active
-                            ? 'inline-flex rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground'
-                            : 'inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-                        }
-                      >
-                        {posting.is_active ? 'Active' : 'Inactive'}
+                      <span className="type-ui inline-flex items-center gap-2 lowercase text-ink">
+                        {posting.is_active ? (
+                          <span className="live-dot" aria-hidden="true" />
+                        ) : (
+                          <span
+                            className="status-dot text-ink-muted"
+                            aria-hidden="true"
+                          />
+                        )}
+                        {posting.is_active ? 'active' : 'inactive'}
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
+                      <div className="flex flex-wrap justify-end gap-2">
                         <Button asChild variant="ghost" size="sm">
                           <a
                             href={posting.apply_url}
@@ -291,8 +349,9 @@ export function Jobs() {
                           {posting.is_active ? 'Deactivate' : 'Activate'}
                         </Button>
                         <Button
-                          variant="destructive"
+                          variant="outline"
                           size="sm"
+                          className="border-destructive text-destructive hover:border-destructive hover:bg-destructive hover:text-white"
                           disabled={busyId === posting._id}
                           onClick={() => handleDelete(posting)}
                         >
@@ -304,9 +363,9 @@ export function Jobs() {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
+          </section>
+        )}
+      </div>
     </div>
   )
 }

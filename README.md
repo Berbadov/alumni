@@ -115,7 +115,7 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 | Controller | Functions and signals that call the API and hold the page state | `frontend/src/controllers/` |
 | Controller | Route table | `frontend/src/app.rs` |
 | View | Page components | `frontend/src/pages/` |
-| View | Shared components (layout, theme toggle, table) | `frontend/src/components/` |
+| View | Shared components (layout, table, job posting form) | `frontend/src/components/` |
 | View | Tailwind CSS styles | `frontend/` stylesheet |
 | View | Static file server | `frontend` container (nginx) |
 
@@ -258,6 +258,9 @@ See `docs/trade-offs.md`.
 
 ## Documentation
 
+- [`BRAND.md`](BRAND.md) - the Pistachio Dream identity: colour, type, borders, motion, tokens.
+- [`DESIGN.md`](DESIGN.md) - reference synthesis: what we take from each site, pattern library,
+  page recipes.
 - `docs/architecture/` - Mermaid diagrams (system context, containers, read flow) and how to view them.
 - `docs/backlog.md` - planned work, in priority order.
 - `docs/done.md` - log of completed work.

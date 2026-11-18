@@ -3,16 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="The alumni directory for the Web Development class of Fall 2026–2027."
+    />
+    <meta name="theme-color" content="#9a1750" />
     <title>Alumni</title>
-    <script>
-      ;(function () {
-        var stored = localStorage.getItem('alumni-theme')
-        var dark = stored
-          ? stored === 'dark'
-          : window.matchMedia('(prefers-color-scheme: dark)').matches
-        if (dark) document.documentElement.classList.add('dark')
-      })()
-    </script>
   </head>
   <body>
     <div id="root"></div>

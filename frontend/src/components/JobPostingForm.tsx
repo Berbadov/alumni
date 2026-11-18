@@ -1,13 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { createJobPosting, replaceJobPosting } from '@/api'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import type { Alumni, JobPosting, JobPostingInput } from '@/types'
 
@@ -42,29 +35,34 @@ function initialValues(
 function Field({
   id,
   label,
+  required = false,
   className,
   children,
 }: {
   id: string
   label: string
+  required?: boolean
   className?: string
   children: ReactNode
 }) {
   return (
-    <div className={`space-y-1.5 ${className ?? ''}`}>
-      <label htmlFor={id} className="text-sm font-medium">
-        {label}
-      </label>
+    <div className={`space-y-2 ${className ?? ''}`}>
+      <div className="flex items-baseline justify-between gap-3">
+        <label htmlFor={id} className="type-label text-ink-muted">
+          {label}
+        </label>
+        {required ? <span className="type-ui text-ink-muted">Required</span> : null}
+      </div>
       {children}
     </div>
   )
 }
 
 const textareaClass =
-  'min-h-24 w-full rounded-md border border-foreground/25 bg-background/40 px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
+  'min-h-28 w-full rounded-field border border-line-strong bg-white px-4 py-3 text-base text-ink outline-none placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50'
 
 const selectClass =
-  'h-9 w-full rounded-md border border-foreground/25 bg-background/40 px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
+  'h-12 w-full rounded-field border border-line-strong bg-white px-4 text-base text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:cursor-not-allowed disabled:opacity-50'
 
 interface JobPostingFormProps {
   posting: JobPosting | null
@@ -125,137 +123,138 @@ export function JobPostingForm({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {posting ? `Edit posting #${posting._id}` : 'New job posting'}
-        </CardTitle>
-        <CardDescription>
-          Saving replaces every field. Fields marked * are required.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          {alumniLoading ? (
-            <p className="text-sm text-muted-foreground">Loading alumni…</p>
-          ) : alumni.length === 0 ? (
-            <p role="alert" className="text-sm text-destructive">
-              No alumni records exist. Add an alumni record before you create a
-              posting.
-            </p>
-          ) : null}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field id="posting-title" label="Title *">
-              <Input
-                id="posting-title"
-                required
-                maxLength={120}
-                value={values.title}
-                onChange={(e) => set('title', e.target.value)}
-              />
-            </Field>
-            <Field id="posting-company" label="Company *">
-              <Input
-                id="posting-company"
-                required
-                value={values.company}
-                onChange={(e) => set('company', e.target.value)}
-              />
-            </Field>
-            <Field id="posting-location" label="Location">
-              <Input
-                id="posting-location"
-                placeholder="Remote"
-                value={values.location}
-                onChange={(e) => set('location', e.target.value)}
-              />
-            </Field>
-            <Field id="posting-type" label="Employment type *">
-              <Input
-                id="posting-type"
-                required
-                placeholder="Full-time"
-                value={values.employment_type}
-                onChange={(e) => set('employment_type', e.target.value)}
-              />
-            </Field>
-            <Field id="posting-author" label="Author *">
-              <select
-                id="posting-author"
-                className={selectClass}
-                required
-                value={values.author_id}
-                onChange={(e) => set('author_id', Number(e.target.value))}
-              >
-                <option value={0} disabled>
-                  Select an author
-                </option>
-                {alumni.map((a) => (
-                  <option key={a._id} value={a._id}>
-                    {a.full_name} ({a.email})
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field id="posting-apply-url" label="Apply URL *">
-              <Input
-                id="posting-apply-url"
-                type="url"
-                required
-                placeholder="https://example.com/jobs/1"
-                value={values.apply_url}
-                onChange={(e) => set('apply_url', e.target.value)}
-              />
-            </Field>
-            <Field
-              id="posting-description"
-              label="Description"
-              className="sm:col-span-2"
-            >
-              <textarea
-                id="posting-description"
-                className={textareaClass}
-                value={values.description}
-                onChange={(e) => set('description', e.target.value)}
-              />
-            </Field>
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="size-4 accent-primary"
-              checked={values.is_active}
-              onChange={(e) => set('is_active', e.target.checked)}
+    <section
+      aria-labelledby="posting-form-heading"
+      className="rounded-slab border border-line bg-white p-6 md:p-8"
+    >
+      <p className="type-label text-ink-muted">04 / POSTING</p>
+      <h2 id="posting-form-heading" className="type-h2 mt-4 text-ink">
+        {posting ? `Edit posting #${posting._id}` : 'New posting'}
+      </h2>
+      <p className="type-ui mt-2 text-ink-muted">
+        Saving replaces every field. Fields marked Required must be completed.
+      </p>
+
+      <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+        {alumniLoading ? (
+          <p className="type-ui text-ink-muted">Loading alumni…</p>
+        ) : alumni.length === 0 ? (
+          <p role="alert" className="type-ui text-destructive">
+            No alumni records exist. Add an alumni record before you create a
+            posting.
+          </p>
+        ) : null}
+
+        <div className="grid gap-6 sm:grid-cols-2">
+          <Field id="posting-title" label="Title" required>
+            <Input
+              id="posting-title"
+              required
+              maxLength={120}
+              value={values.title}
+              onChange={(e) => set('title', e.target.value)}
             />
-            Active &mdash; show this posting in the active list
-          </label>
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-          <div className="flex gap-2">
-            <Button
-              type="submit"
-              disabled={saving || alumniLoading || alumni.length === 0}
+          </Field>
+          <Field id="posting-company" label="Company" required>
+            <Input
+              id="posting-company"
+              required
+              value={values.company}
+              onChange={(e) => set('company', e.target.value)}
+            />
+          </Field>
+          <Field id="posting-location" label="Location">
+            <Input
+              id="posting-location"
+              placeholder="Remote"
+              value={values.location}
+              onChange={(e) => set('location', e.target.value)}
+            />
+          </Field>
+          <Field id="posting-type" label="Employment type" required>
+            <Input
+              id="posting-type"
+              required
+              placeholder="Full-time"
+              value={values.employment_type}
+              onChange={(e) => set('employment_type', e.target.value)}
+            />
+          </Field>
+          <Field id="posting-author" label="Author" required>
+            <select
+              id="posting-author"
+              className={selectClass}
+              required
+              value={values.author_id}
+              onChange={(e) => set('author_id', Number(e.target.value))}
             >
-              {saving
-                ? 'Saving…'
-                : posting
-                  ? 'Save changes'
-                  : 'Create posting'}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={saving}
-              onClick={onCancel}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+              <option value={0} disabled>
+                Select an author
+              </option>
+              {alumni.map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.full_name} ({a.email})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field id="posting-apply-url" label="Apply URL" required>
+            <Input
+              id="posting-apply-url"
+              type="url"
+              required
+              placeholder="https://example.com/jobs/1"
+              value={values.apply_url}
+              onChange={(e) => set('apply_url', e.target.value)}
+            />
+          </Field>
+          <Field
+            id="posting-description"
+            label="Description"
+            className="sm:col-span-2"
+          >
+            <textarea
+              id="posting-description"
+              className={textareaClass}
+              value={values.description}
+              onChange={(e) => set('description', e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <label className="type-ui flex items-center gap-3 text-ink">
+          <input
+            type="checkbox"
+            className="size-4 accent-mulberry"
+            checked={values.is_active}
+            onChange={(e) => set('is_active', e.target.checked)}
+          />
+          Active &mdash; show this posting in the active list
+        </label>
+
+        {error ? (
+          <p role="alert" className="type-ui text-destructive">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex flex-wrap gap-3">
+          <Button
+            type="submit"
+            disabled={saving || alumniLoading || alumni.length === 0}
+          >
+            {saving ? 'Saving…' : posting ? 'Save changes' : 'Create posting'}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </section>
   )
 }

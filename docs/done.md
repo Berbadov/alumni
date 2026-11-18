@@ -2,6 +2,70 @@
 
 Completed work log, newest first.
 
+## 2026-11-18 — Pistachio Dream shipped in the frontend
+- `frontend/src/index.css`: replaced the lime/navy shadcn tokens with the v1.1
+  system — green and editorial families, derived neutrals, plate/slab/field/pill
+  radii, motion tokens, and `@theme` mappings. Added the shared pattern classes:
+  `type-*` scale, `surface-terminal`, `surface-cellar`, `grid-live`, `halftone`,
+  `reel`, `ledger-frame`, `corner-ticks`, `live-dot`, `reveal`, `arrow-link`,
+  `marquee`, plus the global reduced-motion rule.
+- `frontend/src/main.tsx` + `package.json`: self-hosted IBM Plex Serif
+  400/500/600/italic and Inter Variable through `@fontsource`; no runtime font
+  request.
+- `frontend/src/components/Layout.tsx`: 64px masthead, `alumni.` wordmark with
+  rose period and 2×2 mark tile, mulberry active underline, label meta, and an
+  editorial footer with a source line.
+- `frontend/src/components/ui/*`: branded primitives — pill buttons, 20px slab
+  cards, 48px field inputs, hairline tables with `type-label` headers.
+- Removed `ThemeToggle`, the `.dark` block, and the `localStorage` theme script
+  in `index.html`; the app is light-only. Added a description and theme-colour
+  meta tag.
+- Redesigned every page with one hy4-flash subagent per page:
+  - Home — halftone hero, live instrument strip from the API, product-garden
+    plates, Terminal chapter band with a node diagram and a live node.
+  - Alumni — instrument strip, plate header, branded table with row index,
+    mailto links, explicit "Not recorded.", skeleton and retry states.
+  - Jobs — header band, pill filters, slab form, status dots, plate table,
+    source line, dotted empty state.
+  - About — Cellar chapter band, diagrammatic 21:9 reel, editorial rail, poem
+    as archive typography, evidence blocks, Cellar afterword, Paper ending.
+  - Not found — 5/7 editorial 404, ledger index nav with a `missing` row,
+    halftone plate, source line.
+- `docs/backlog.md`: removed the brand-migration item.
+- Verified with `npx tsc --noEmit` and `npm run build` in `frontend/`, then in
+  Docker: `docker compose up --build -d` rebuilt `alumni-api` and `frontend`;
+  `/`, `/alumni`, `/jobs`, `/about`, `/404`, the CSS/JS bundles, a font file, and
+  `/api/v1/alumni` all return 200. The API log shows no errors.
+
+## 2026-11-18 — Brand book + reference synthesis: Pistachio Dream
+- `BRAND.md` (new, repo root): the design system for the frontend. Concept "The
+  Living Ledger" — a botanical archive printed in wine ink. Version 1.1 adds the
+  second palette and the two-accent law.
+- Colour: green family `#80EF80` (mint), `#E3F0A3` (hay), `#BADBA2` (sage),
+  `#42D674` (signal) for data and live state; editorial family `#5D001E`
+  (oxblood), `#E3E2DF` (bone), `#E3AFBC` (blush), `#9A1750` (mulberry),
+  `#EE4C7C` (rose) for voice and action. Includes role rules, measured contrast
+  pairs, and forbidden pairings (white on signal, rose on oxblood).
+- Type: IBM Plex Serif 400/500/600 + real italic for headings and voice; Inter for
+  body, UI, and labels. Full clamp-based scale, two-tone headline rule, and a
+  deliberate rejection of the reference sites' mono faces.
+- Shape: concrete borders — 1px hairlines, plate/slab/pill/field radii, corner
+  ticks, 3×3 node ticks, right-angle connectors, circular arrows, 21:9 reel
+  frames, no blurred shadows.
+- Motion: "alive and moving" spec — ambient grid/halftone/reel drift, 800ms
+  hairline draw, 1.8s live-node pulse, 640ms type reveal, cursor blush field,
+  chapter wipe, rail progress, marquee, with reduced-motion and performance rules.
+- `DESIGN.md` (new, repo root): reference synthesis for Mistral, Google for
+  Developers, Inception Labs, Kriko, Fortiche, and the wine/rose poster. Records
+  take/leave per source, palette and type translation, a 12-pattern library,
+  page recipes, motion budget, and rejected moves.
+- Also covers logo/mark, 12-column grid, components, Paper/Terminal/Cellar
+  surfaces, iconography, evidence/source formatting, accessibility, copy-paste
+  Tailwind v4 tokens, and a review checklist.
+- `docs/backlog.md`: added the frontend migration as the next item.
+- `docs/trade-offs.md`: recorded why this supersedes Mistral Classic, why terminal
+  bands are not a theme, and why the dual palette is split by role.
+
 ## 2026-11-11 — Request logging, 404 guardian, error log, JobPosting rules
 - `services/alumni-api/src/middleware.rs` (new): `RequestLogger` middleware prints one
   line per request on the terminal: `HH:MM:SS METHOD PATH STATUS DURATIONms`

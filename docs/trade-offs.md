@@ -2,6 +2,68 @@
 
 Decisions and compromises, with rationale.
 
+## Brand: Pistachio Dream supersedes Mistral Classic
+The 2026-09-23 restyle picked a cream canvas, teal accent, and Sora display type.
+The new brand keeps that spec's operational decisions — self-hosted fontsource
+packages, light-only app, no runtime font request — but replaces its visual layer:
+the green palette (`#80EF80`, `#E3F0A3`, `#BADBA2`, `#42D674`), the editorial
+reds (`#5D001E`, `#E3E2DF`, `#E3AFBC`, `#9A1750`, `#EE4C7C`), IBM Plex Serif for
+titles, Inter for body, and a concrete hairline/ticks shape language. Cost: the
+teal/cream tokens and Sora were already specified but not fully shipped, so the
+migration restarts the visual work. Benefit: one coherent identity instead of
+layering a third palette onto the old one. `BRAND.md` is the source of truth; the
+old spec stays as a record of the rejected direction.
+
+## Brand: two accent families, split by job
+The palette now has two colour families, which risks muddiness. The rule that
+prevents it: green means data/live, red means voice/action. Signal `#42D674` is
+reserved for live state and never becomes a button; mulberry `#9A1750` is the
+only body-safe red and becomes links/primary actions; rose `#EE4C7C` is large
+display or decoration only. Oxblood `#5D001E` adds a second dark band (`Cellar`)
+beside the near-black `Terminal`. Cost: designers must consult the role table
+before choosing an accent. Benefit: the brand reads as botanical data plus
+editorial ink, not as a christmas combination. A view that uses red for status or
+green for a headline is off-brand.
+
+## Design references: principles, not a collage
+`DESIGN.md` records what is taken from Mistral, Google for Developers, Inception
+Labs, Kriko, Fortiche, and the wine/rose poster. Each source contributes a
+principle or pattern — Mistral's node chips and bands, Google's docs clarity and
+card garden, Inception's instrumentation, Kriko's evidence lines, Fortiche's reel
+frames, the poster's rail and halftone. No reference hue, logo, or font ships.
+Cost: every screen must name its pattern instead of copying a reference layout.
+Benefit: the references improve structure without diluting the identity.
+
+## Brand: dark bands are Terminal and Cellar, not a theme
+The reference imagery includes near-black and oxblood canvases, but the app stays
+light-only. Instead of a theme toggle, dark appears as full-bleed chapter bands:
+`Terminal #0B120E` for data and `Cellar #5D001E` for editorial interludes. This
+preserves contrast and the "paper first" concept without maintaining two full
+token sets or a toggle. Cost: components used inside a band need a scoped class
+(`.surface-terminal`, `.surface-cellar`). Benefit: no duplicated theme surface, no
+OS-preference surprises.
+
+## Brand applied as shared utilities, not per-page tokens
+The migration put the palette, type scale, surfaces, textures, and motion in
+`src/index.css` as classes (`type-*`, `surface-*`, `grid-live`, `halftone`,
+`corner-ticks`, `live-dot`, `arrow-link`). Pages compose those classes and the
+token utilities instead of declaring their own values. Cost: the CSS layer is
+larger than a pure utility setup, and a page can still misuse a token. Benefit:
+the five pages and the shared chrome built in parallel share one visual contract,
+and a palette or motion change lands in one file. The `.dark` block, `ThemeToggle`, and the theme
+bootstrap script were deleted rather than kept dormant: a hidden dark mode would
+drift from the two dark surfaces (`Terminal`, `Cellar`) that the brand defines.
+Fonts ship through `@fontsource`, so the build grows by the font subsets but the
+app makes no runtime request to a font host.
+
+## Brand: motion budget
+The brand is explicitly "alive and moving", but ambient motion is capped at one
+focal loop per viewport, 18–48s and 4–16px amplitude (scale ≤1.03), with
+interface motion at 120–240ms and `prefers-reduced-motion` disabling loops. This
+keeps the system feeling live without hurting readability or low-end devices. It
+also rules out bounce/spring easings, heavy grain, and blurred shadows, which
+conflict with the concrete, technical reference language.
+
 ## Request logger middleware, error log file, and the 404 guardian
 The terminal line `time | method | route | status | duration` comes from a custom
 `RequestLogger` middleware (`middleware.rs`), not from actix `Logger` format codes,

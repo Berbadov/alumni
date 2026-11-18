@@ -25,6 +25,9 @@ project-specific overrides that win on conflict within this repo.
 
 ## Project overrides (win on conflict in this repo)
 
+- **Brand is `BRAND.md`, references are `DESIGN.md`.** Follow Pistachio Dream:
+  green = data/live, red = voice/action, IBM Plex Serif + Inter, concrete hairlines.
+  Do not introduce a third font, an off-palette accent, or a reference brand's hue.
 - **Simple, goal-achieving code.** Minimal comments — only for non-obvious behavior, never for deliberation.
 - **Everything runs in Docker.** Docs assume `docker compose`; no host-run steps unless explicitly noted.
 - **Docs are first-class.** Every feature touches:
