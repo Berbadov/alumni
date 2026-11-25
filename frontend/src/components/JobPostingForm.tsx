@@ -1,12 +1,25 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { createJobPosting, replaceJobPosting } from '@/api'
+import { useAuth } from '@/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { Alumni, JobPosting, JobPostingInput } from '@/types'
+import { isAdmin } from '@/navigation'
+import type { Alumni, JobPosting, JobPostingInput, User } from '@/types'
+
+function defaultAuthorId(
+  posting: JobPosting | null,
+  alumni: Alumni[],
+  user: User | null,
+): number {
+  if (posting) return posting.author_id
+  if (user && !isAdmin(user)) return user._id
+  return user?._id ?? alumni[0]?._id ?? 0
+}
 
 function initialValues(
   posting: JobPosting | null,
   alumni: Alumni[],
+  user: User | null,
 ): JobPostingInput {
   if (posting) {
     return {
@@ -27,7 +40,7 @@ function initialValues(
     location: '',
     employment_type: '',
     apply_url: '',
-    author_id: alumni[0]?._id ?? 0,
+    author_id: defaultAuthorId(posting, alumni, user),
     is_active: true,
   }
 }
@@ -79,21 +92,24 @@ export function JobPostingForm({
   onCancel,
   onSaved,
 }: JobPostingFormProps) {
+  const { user } = useAuth()
+  const adminUser = isAdmin(user)
   const [values, setValues] = useState<JobPostingInput>(() =>
-    initialValues(posting, alumni),
+    initialValues(posting, alumni, user),
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!posting && alumni.length > 0) {
-      setValues((current) =>
-        current.author_id === 0
-          ? { ...current, author_id: alumni[0]._id }
-          : current,
-      )
+    if (!posting) {
+      const nextAuthor = defaultAuthorId(null, alumni, user)
+      if (nextAuthor > 0) {
+        setValues((current) =>
+          current.author_id === 0 ? { ...current, author_id: nextAuthor } : current,
+        )
+      }
     }
-  }, [alumni, posting])
+  }, [alumni, posting, user])
 
   function set<K extends keyof JobPostingInput>(
     key: K,
@@ -136,13 +152,8 @@ export function JobPostingForm({
       </p>
 
       <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-        {alumniLoading ? (
+        {adminUser && alumniLoading ? (
           <p className="type-ui text-ink-muted">Loading alumni…</p>
-        ) : alumni.length === 0 ? (
-          <p role="alert" className="type-ui text-destructive">
-            No alumni records exist. Add an alumni record before you create a
-            posting.
-          </p>
         ) : null}
 
         <div className="grid gap-6 sm:grid-cols-2">
@@ -181,22 +192,35 @@ export function JobPostingForm({
             />
           </Field>
           <Field id="posting-author" label="Author" required>
-            <select
-              id="posting-author"
-              className={selectClass}
-              required
-              value={values.author_id}
-              onChange={(e) => set('author_id', Number(e.target.value))}
-            >
-              <option value={0} disabled>
-                Select an author
-              </option>
-              {alumni.map((a) => (
-                <option key={a._id} value={a._id}>
-                  {a.full_name} ({a.email})
+            {adminUser ? (
+              <select
+                id="posting-author"
+                className={selectClass}
+                required
+                value={values.author_id}
+                onChange={(e) => set('author_id', Number(e.target.value))}
+              >
+                <option value={0} disabled>
+                  Select an author
                 </option>
-              ))}
-            </select>
+                {user ? (
+                  <option value={user._id}>
+                    {user.full_name} (your account #{user._id})
+                  </option>
+                ) : null}
+                {alumni.map((a) => (
+                  <option key={a._id} value={a._id}>
+                    {a.full_name} ({a.email})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <Input
+                id="posting-author"
+                readOnly
+                value={user ? `${user.full_name} (#${user._id})` : ''}
+              />
+            )}
           </Field>
           <Field id="posting-apply-url" label="Apply URL" required>
             <Input
@@ -239,10 +263,7 @@ export function JobPostingForm({
         ) : null}
 
         <div className="flex flex-wrap gap-3">
-          <Button
-            type="submit"
-            disabled={saving || alumniLoading || alumni.length === 0}
-          >
+          <Button type="submit" disabled={saving || values.author_id === 0}>
             {saving ? 'Saving…' : posting ? 'Save changes' : 'Create posting'}
           </Button>
           <Button

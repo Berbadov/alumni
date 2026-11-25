@@ -2,6 +2,50 @@
 
 Decisions and compromises, with rationale.
 
+## User-specific workspaces and self-profile updates
+Each role group has its own frontend workspace routed from `navigation.ts`:
+`/account` (all signed-in roles), `/verification` (`unverified`), `/student`
+(`undergrad`, `grad`, `phd`), `/graduate` (`alumni`), `/faculty` (`academic`,
+`professor`, `admin`), and `/admin` (`admin`). Signed-in users update their own
+name, phone number, graduation date, and password through `PATCH /api/v1/auth/me`
+requiring `current_password` for password changes, rather than exposing user
+edits on `/admin` routes. Non-admin job authors post under their own
+`user._id` in `JobPostingForm` so `can_act_as_author` succeeds without needing a
+pre-existing `alumni` row. Cost: users holding multiple roles (such as `alumni`
+plus `professor`) see multiple workspace items in the menu rather than one
+merged dashboard; each view stays focused on one role's workflow.
+
+## Frontend dynamic navigation: single role-capability source of truth
+The header menu (`Layout.tsx`), landing-page plates (`Home.tsx`), route guards
+(`RequireAccess.tsx`), and job-posting controls (`Jobs.tsx`) all read from one
+capability module (`frontend/src/navigation.ts`) aligned with the backend
+`User` policy methods in `models.rs`. Guests see `Home`, `About`, `Register`,
+and `Sign in`; signed-in `unverified` users see `Home`, `About`, and `Status`
+(without triggering forbidden `/alumni` or `/job-postings` fetches); verified
+members gain `Alumni` and `Jobs`; and `admin` users gain `Admin`. Cost: client
+menus and guards only shape UX and can be edited in DevTools, so backend
+`AuthMiddleware` and controller checks remain authoritative.
+
+## Registration and sessions: `unverified` default, HttpOnly cookie, inactive SMS/email hooks
+Every self-registered user receives `roles: ["unverified"]` and
+`verification_status: "pending"`, storing the claimed `requested_role` until an
+admin reviews government papers. `POST /api/v1/auth/login` sets an `HttpOnly`,
+`SameSite=Lax` cookie (`alumni_session`) backed by SHA-256 token digests in
+`sessions` (7-day TTL) rather than localStorage JWTs, keeping tokens out of JS
+while working across the same-origin nginx proxy (`POST /api/v1/auth/logout`
+revokes the digest and clears the cookie). `VerificationPolicy` and `REQUIRE_EMAIL_VERIFICATION` / `REQUIRE_SMS_VERIFICATION`
+flags live in code defaulting to `false`, so email and SMS checks are ready
+without blocking signup until provider wiring lands. `AuthMiddleware` protects
+the resource prefixes (`alumni`, `announcements`, `job-postings`, `auth/me`) and
+lets public and unmatched routes pass to handlers or `not_found`, preserving 404
+guardian behavior; controllers extract `AuthenticatedUser` and call policy
+methods on `User` in `models.rs` so authorization rules stay in the Model.
+Passwords use PBKDF2-HMAC-SHA256 from crates already locked in `Cargo.lock`
+instead of adding `argon2`. Cost: uploaded paper document files stay in the backlog; admins record
+verification decisions (`government_papers`) directly.
+An optional `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` env pair seeds an
+initial admin on startup without hardcoding credentials in the image.
+
 ## Brand: Pistachio Dream supersedes Mistral Classic
 The 2026-09-23 restyle picked a cream canvas, teal accent, and Sora display type.
 The new brand keeps that spec's operational decisions — self-hosted fontsource

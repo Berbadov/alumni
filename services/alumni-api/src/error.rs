@@ -9,6 +9,10 @@ pub enum ApiError {
     NotFound,
     #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
+    Unauthorized(String),
+    #[error("{0}")]
+    Forbidden(String),
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -19,6 +23,8 @@ impl From<ModelError> for ApiError {
             ModelError::Invalid(msg) | ModelError::Blocked(msg) => {
                 Self::BadRequest(msg.to_owned())
             }
+            ModelError::Unauthenticated(msg) => Self::Unauthorized(msg.to_owned()),
+            ModelError::Forbidden(msg) => Self::Forbidden(msg.to_owned()),
             ModelError::NotFound => Self::NotFound,
             ModelError::Duplicate => Self::BadRequest("email already exists".to_owned()),
             ModelError::Internal(msg) => Self::Internal(msg),
@@ -29,9 +35,11 @@ impl From<ModelError> for ApiError {
 impl ResponseError for ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
-            ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            ApiError::NotFound => StatusCode::NOT_FOUND,
-            ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
         }
     }
 

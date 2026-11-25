@@ -1,4 +1,17 @@
-import type { Alumni, JobPosting, JobPostingInput } from './types'
+import type {
+  AdminUpdateUserInput,
+  Alumni,
+  Announcement,
+  AnnouncementInput,
+  AuthSession,
+  JobPosting,
+  JobPostingInput,
+  LoginInput,
+  RegisterInput,
+  UpdateOwnProfileInput,
+  User,
+  VerifyUserInput,
+} from './types'
 
 async function errorMessage(res: Response): Promise<string> {
   try {
@@ -18,7 +31,7 @@ async function errorMessage(res: Response): Promise<string> {
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
+  const res = await fetch(url, { credentials: 'same-origin', ...init })
   if (!res.ok) {
     throw new Error(await errorMessage(res))
   }
@@ -33,6 +46,78 @@ const json = (method: string, body: unknown): RequestInit => ({
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 })
+
+export function registerUser(input: RegisterInput): Promise<User> {
+  return request('/api/v1/auth/register', json('POST', input))
+}
+
+export function loginUser(input: LoginInput): Promise<AuthSession> {
+  return request('/api/v1/auth/login', json('POST', input))
+}
+
+export function logoutUser(): Promise<void> {
+  return request('/api/v1/auth/logout', { method: 'POST' })
+}
+
+export async function fetchCurrentUser(): Promise<User | null> {
+  const res = await fetch('/api/v1/auth/me', { credentials: 'same-origin' })
+  if (res.status === 401) {
+    return null
+  }
+  if (!res.ok) {
+    throw new Error(await errorMessage(res))
+  }
+  return res.json() as Promise<User>
+}
+
+export function updateCurrentUser(input: UpdateOwnProfileInput): Promise<User> {
+  return request('/api/v1/auth/me', json('PATCH', input))
+}
+
+export function fetchAnnouncements(): Promise<Announcement[]> {
+  return request('/api/v1/announcements')
+}
+
+export function createAnnouncement(
+  input: AnnouncementInput,
+): Promise<Announcement> {
+  return request('/api/v1/announcements', json('POST', input))
+}
+
+export function replaceAnnouncement(
+  id: number,
+  input: AnnouncementInput,
+): Promise<Announcement> {
+  return request(`/api/v1/announcements/${id}`, json('PUT', input))
+}
+
+export function deleteAnnouncement(id: number): Promise<void> {
+  return request(`/api/v1/announcements/${id}`, { method: 'DELETE' })
+}
+
+export function fetchAdminUsers(): Promise<User[]> {
+  return request('/api/v1/admin/users')
+}
+
+export function verifyAdminUser(
+  id: number,
+  input: VerifyUserInput,
+): Promise<User> {
+  return request(`/api/v1/admin/users/${id}/verify`, json('POST', input))
+}
+
+export function updateAdminUser(
+  id: number,
+  input: AdminUpdateUserInput,
+): Promise<User> {
+  return request(`/api/v1/admin/users/${id}`, json('PATCH', input))
+}
+
+export function revokeAdminUserSessions(id: number): Promise<void> {
+  return request(`/api/v1/admin/users/${id}/revoke-sessions`, {
+    method: 'POST',
+  })
+}
 
 export function fetchAlumni(): Promise<Alumni[]> {
   return request('/api/v1/alumni')

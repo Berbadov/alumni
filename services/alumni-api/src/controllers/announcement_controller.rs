@@ -9,6 +9,7 @@ use actix_web::{HttpResponse, web};
 use maud::Markup;
 
 use crate::AppState;
+use crate::auth_middleware::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::models::{CreateAnnouncement, ModelError};
 use crate::views::announcements::{self, Draft};
@@ -43,7 +44,11 @@ fn respond(result: Result<HttpResponse, ModelError>) -> Result<HttpResponse, Api
             content_type = "text/html", body = String),
     ),
 )]
-pub async fn index(state: web::Data<AppState>) -> Result<HttpResponse, ApiError> {
+pub async fn index(
+    state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
+) -> Result<HttpResponse, ApiError> {
+    actor.can_read_directory()?;
     respond(
         state
             .announcements
@@ -67,8 +72,11 @@ pub async fn index(state: web::Data<AppState>) -> Result<HttpResponse, ApiError>
 )]
 pub async fn create(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     form: web::Form<CreateAnnouncement>,
 ) -> Result<HttpResponse, ApiError> {
+    actor.can_create_announcement()?;
+    actor.can_act_as_author(form.author_id)?;
     respond(match state.announcements.create(&form).await {
         Ok(_) => Ok(see_other("/announcements")),
         Err(ModelError::Invalid(error)) => state.announcements.list().await.map(|all| {
@@ -95,8 +103,10 @@ pub async fn create(
 )]
 pub async fn show(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
+    actor.can_read_directory()?;
     respond(
         state
             .announcements
@@ -119,15 +129,21 @@ pub async fn show(
 )]
 pub async fn edit(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
-    respond(
-        state
-            .announcements
-            .get(path.into_inner())
-            .await
-            .map(|announcement| html(StatusCode::OK, announcements::edit(&announcement, None))),
-    )
+    let announcement = match state.announcements.get(path.into_inner()).await {
+        Ok(item) => item,
+        Err(ModelError::NotFound) => {
+            return Ok(html(StatusCode::NOT_FOUND, announcements::not_found()));
+        }
+        Err(err) => return Err(err.into()),
+    };
+    actor.can_modify_announcement(announcement.author_id)?;
+    Ok(html(
+        StatusCode::OK,
+        announcements::edit(&announcement, None),
+    ))
 }
 
 /// Replaces the fields of an announcement from the form, then redirects to its page.
@@ -146,10 +162,20 @@ pub async fn edit(
 )]
 pub async fn update(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
     form: web::Form<CreateAnnouncement>,
 ) -> Result<HttpResponse, ApiError> {
     let id = path.into_inner();
+    let existing = match state.announcements.get(id).await {
+        Ok(item) => item,
+        Err(ModelError::NotFound) => {
+            return Ok(html(StatusCode::NOT_FOUND, announcements::not_found()));
+        }
+        Err(err) => return Err(err.into()),
+    };
+    actor.can_modify_announcement(existing.author_id)?;
+    actor.can_act_as_author(form.author_id)?;
     respond(match state.announcements.replace(id, &form).await {
         Ok(_) => Ok(see_other(&format!("/announcements/{id}"))),
         Err(ModelError::Invalid(error)) => state.announcements.get(id).await.map(|announcement| {
@@ -179,12 +205,22 @@ pub async fn update(
 )]
 pub async fn delete(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
+    let id = path.into_inner();
+    let existing = match state.announcements.get(id).await {
+        Ok(item) => item,
+        Err(ModelError::NotFound) => {
+            return Ok(html(StatusCode::NOT_FOUND, announcements::not_found()));
+        }
+        Err(err) => return Err(err.into()),
+    };
+    actor.can_modify_announcement(existing.author_id)?;
     respond(
         state
             .announcements
-            .delete(path.into_inner())
+            .delete(id)
             .await
             .map(|()| see_other("/announcements")),
     )

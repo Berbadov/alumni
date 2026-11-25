@@ -4,6 +4,7 @@
 use actix_web::{HttpResponse, web};
 
 use crate::AppState;
+use crate::auth_middleware::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::models::{Alumni, CreateAlumni, UpdateAlumni};
 
@@ -16,12 +17,16 @@ use crate::models::{Alumni, CreateAlumni, UpdateAlumni};
     responses(
         (status = 201, description = "Alumni created", body = Alumni),
         (status = 400, description = "Invalid fields or duplicate email"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Admin role required"),
     ),
 )]
 pub async fn create(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     body: web::Json<CreateAlumni>,
 ) -> Result<HttpResponse, ApiError> {
+    actor.can_create_alumni()?;
     let alumni = state.alumni.create(&body).await?;
     Ok(HttpResponse::Created().json(alumni))
 }
@@ -31,9 +36,17 @@ pub async fn create(
     get,
     path = "/api/v1/alumni",
     tag = "ApiAlumniController",
-    responses((status = 200, description = "All alumni", body = [Alumni])),
+    responses(
+        (status = 200, description = "All alumni", body = [Alumni]),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Account verification pending"),
+    ),
 )]
-pub async fn list(state: web::Data<AppState>) -> Result<web::Json<Vec<Alumni>>, ApiError> {
+pub async fn list(
+    state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
+) -> Result<web::Json<Vec<Alumni>>, ApiError> {
+    actor.can_read_directory()?;
     Ok(web::Json(state.alumni.list().await?))
 }
 
@@ -45,13 +58,17 @@ pub async fn list(state: web::Data<AppState>) -> Result<web::Json<Vec<Alumni>>, 
     params(("id" = u64, Path, description = "Alumni id")),
     responses(
         (status = 200, description = "The alumni record", body = Alumni),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Account verification pending"),
         (status = 404, description = "No alumni record with that id"),
     ),
 )]
 pub async fn get(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
 ) -> Result<web::Json<Alumni>, ApiError> {
+    actor.can_read_directory()?;
     Ok(web::Json(state.alumni.get(path.into_inner()).await?))
 }
 
@@ -65,17 +82,21 @@ pub async fn get(
     responses(
         (status = 200, description = "Alumni replaced", body = Alumni),
         (status = 400, description = "Invalid fields or duplicate email"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "No alumni record with that id"),
     ),
 )]
 pub async fn replace(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
     body: web::Json<CreateAlumni>,
 ) -> Result<web::Json<Alumni>, ApiError> {
-    Ok(web::Json(
-        state.alumni.replace(path.into_inner(), &body).await?,
-    ))
+    let id = path.into_inner();
+    let existing = state.alumni.get(id).await?;
+    actor.can_update_alumni(existing.user_id)?;
+    Ok(web::Json(state.alumni.replace(id, &body).await?))
 }
 
 /// Applies a partial update to an alumni record (only provided fields change).
@@ -88,19 +109,22 @@ pub async fn replace(
     responses(
         (status = 200, description = "Alumni updated", body = Alumni),
         (status = 400, description = "Invalid fields or duplicate email"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "No alumni record with that id"),
     ),
 )]
 pub async fn update(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
     body: web::Json<UpdateAlumni>,
 ) -> Result<web::Json<Alumni>, ApiError> {
+    let id = path.into_inner();
+    let existing = state.alumni.get(id).await?;
+    actor.can_update_alumni(existing.user_id)?;
     Ok(web::Json(
-        state
-            .alumni
-            .update(path.into_inner(), body.into_inner())
-            .await?,
+        state.alumni.update(id, body.into_inner()).await?,
     ))
 }
 
@@ -113,13 +137,17 @@ pub async fn update(
     responses(
         (status = 204, description = "Alumni deleted"),
         (status = 400, description = "Alumni has announcements"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Admin role required"),
         (status = 404, description = "No alumni record with that id"),
     ),
 )]
 pub async fn delete(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
+    actor.can_delete_alumni()?;
     state.alumni.delete(path.into_inner()).await?;
     Ok(HttpResponse::NoContent().finish())
 }

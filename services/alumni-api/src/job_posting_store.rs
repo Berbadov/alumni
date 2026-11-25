@@ -11,6 +11,7 @@ use crate::models::{
 #[derive(Debug, Clone)]
 pub struct JobPostingStore {
     alumni: Collection<Document>,
+    users: Collection<Document>,
     job_postings: Collection<Document>,
     counters: Collection<Document>,
 }
@@ -19,6 +20,7 @@ impl JobPostingStore {
     pub fn new(db: &Database) -> Self {
         Self {
             alumni: db.collection("alumni"),
+            users: db.collection("users"),
             job_postings: db.collection("job_postings"),
             counters: db.collection("counters"),
         }
@@ -39,12 +41,20 @@ impl JobPostingStore {
 
     async fn check_author(&self, author_id: u64) -> Result<i64, ModelError> {
         let key = i64::try_from(author_id).map_err(ModelError::internal)?;
-        let found = self
+        let user_found = self
+            .users
+            .find_one(doc! { "_id": key })
+            .await
+            .map_err(ModelError::internal)?;
+        if user_found.is_some() {
+            return Ok(key);
+        }
+        let alumni_found = self
             .alumni
             .find_one(doc! { "_id": key })
             .await
             .map_err(ModelError::internal)?;
-        if found.is_none() {
+        if alumni_found.is_none() {
             return Err(ModelError::Invalid("unknown author_id"));
         }
         Ok(key)

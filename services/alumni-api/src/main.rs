@@ -2,6 +2,7 @@
 
 mod alumni_store;
 mod announcement_store;
+mod auth_middleware;
 mod config;
 mod controllers;
 mod error;
@@ -10,14 +11,18 @@ mod job_posting_store;
 mod middleware;
 mod models;
 mod routes;
+mod session_store;
+mod user_store;
+mod verification;
 mod views;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use controllers::{
-    announcement_controller, api_alumni_controller, api_announcement_controller,
-    api_job_posting_controller,
+    announcement_controller, api_admin_controller, api_alumni_controller,
+    api_announcement_controller, api_auth_controller, api_job_posting_controller,
 };
 use mongodb::bson::doc;
 use mongodb::options::ClientOptions;
@@ -27,8 +32,12 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use alumni_store::AlumniStore;
 use announcement_store::AnnouncementStore;
+use auth_middleware::AuthMiddleware;
 use job_posting_store::JobPostingStore;
 use middleware::RequestLogger;
+use session_store::SessionStore;
+use user_store::UserStore;
+use verification::VerificationPolicy;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -38,6 +47,8 @@ use middleware::RequestLogger;
         description = "Alumni records (JSON), announcement pages (HTML), job postings (JSON), and their REST APIs."
     ),
     tags(
+        (name = "ApiAuthController", description = "JSON registration and authentication under /api/v1/auth"),
+        (name = "ApiAdminController", description = "Admin user management and paper verification under /api/v1/admin"),
         (name = "ApiAlumniController", description = "JSON alumni CRUD under /api/v1/alumni"),
         (name = "AnnouncementController", description = "HTML pages under /announcements: list, create, show, edit, update, delete"),
         (name = "ApiAnnouncementController", description = "JSON announcement CRUD under /api/v1/announcements (alias: /api/announcements)"),
@@ -45,6 +56,15 @@ use middleware::RequestLogger;
     ),
     paths(
         handlers::health,
+        api_auth_controller::register,
+        api_auth_controller::login,
+        api_auth_controller::logout,
+        api_auth_controller::me,
+        api_auth_controller::update_me,
+        api_admin_controller::list_users,
+        api_admin_controller::verify_user,
+        api_admin_controller::update_user,
+        api_admin_controller::revoke_sessions,
         api_alumni_controller::create,
         api_alumni_controller::list,
         api_alumni_controller::get,
@@ -71,6 +91,15 @@ use middleware::RequestLogger;
         api_job_posting_controller::delete,
     ),
     components(schemas(
+        models::User,
+        models::RegisterUser,
+        models::LoginRequest,
+        models::AuthSession,
+        models::UpdateOwnProfileRequest,
+        models::VerifyUserRequest,
+        models::AdminUpdateUserRequest,
+        models::Role,
+        models::VerificationStatus,
         models::Alumni,
         models::CreateAlumni,
         models::UpdateAlumni,
@@ -90,6 +119,8 @@ pub struct AppState {
     pub alumni: AlumniStore,
     pub announcements: AnnouncementStore,
     pub job_postings: JobPostingStore,
+    pub users: UserStore,
+    pub sessions: SessionStore,
 }
 
 fn io_error(err: impl std::fmt::Display) -> std::io::Error {
@@ -144,11 +175,60 @@ async fn main() -> std::io::Result<()> {
         )
         .await
         .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("users")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "email": 1 })
+                .options(
+                    mongodb::options::IndexOptions::builder()
+                        .unique(true)
+                        .build(),
+                )
+                .build(),
+        )
+        .await
+        .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("users")
+        .create_index(IndexModel::builder().keys(doc! { "roles": 1 }).build())
+        .await
+        .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("sessions")
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
+        .await
+        .map_err(io_error)?;
+    db.collection::<mongodb::bson::Document>("sessions")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "expires_at": 1 })
+                .options(
+                    mongodb::options::IndexOptions::builder()
+                        .expire_after(Duration::from_secs(0))
+                        .build(),
+                )
+                .build(),
+        )
+        .await
+        .map_err(io_error)?;
+
+    let verification_policy = VerificationPolicy::from_flags(
+        cfg.require_email_verification,
+        cfg.require_sms_verification,
+    );
+
+    let users = UserStore::with_policy(&db, verification_policy);
+    if let Some(email) = cfg.bootstrap_admin_email.as_deref() {
+        users
+            .ensure_bootstrap_admin(email, cfg.bootstrap_admin_password.as_deref())
+            .await
+            .map_err(|err| io_error(error::ApiError::from(err)))?;
+    }
 
     let state = web::Data::new(AppState {
         alumni: AlumniStore::new(&db),
         announcements: AnnouncementStore::new(&db),
         job_postings: JobPostingStore::new(&db),
+        users,
+        sessions: SessionStore::new(&db),
     });
 
     let error_log = PathBuf::from(&cfg.error_log);
@@ -161,6 +241,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(state.clone())
             .wrap(Logger::default())
             .wrap(RequestLogger::new(error_log.clone()))
+            .wrap(AuthMiddleware)
             .default_service(web::route().to(middleware::not_found))
             .service(
                 SwaggerUi::new("/api/swagger/{_:.*}")

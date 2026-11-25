@@ -3,43 +3,167 @@ import { Link } from 'react-router-dom'
 import {
   ArrowUpRight,
   Briefcase,
+  GraduationCap,
   Info,
+  LogIn,
+  Megaphone,
+  ShieldCheck,
+  UserCheck,
+  UserPlus,
   Users,
   type LucideIcon,
 } from 'lucide-react'
 import { fetchAlumni, fetchJobPostings } from '@/api'
+import { useAuth } from '@/auth'
 import { Button } from '@/components/ui/button'
-import type { Alumni, JobPosting } from '@/types'
+import {
+  hasAnyRole,
+  hasRole,
+  isAdmin,
+  isVerifiedMember,
+  primaryWorkspaceFor,
+} from '@/navigation'
+import type { Alumni, JobPosting, User } from '@/types'
 
-const plates: {
+interface HomePlate {
   title: string
   href: string
   icon: LucideIcon
   proof: string
   cta: string
-}[] = [
-  {
-    title: 'Alumni',
-    href: '/alumni',
-    icon: Users,
-    proof: 'Names, degrees, and the years they left.',
-    cta: 'View directory',
-  },
-  {
-    title: 'Jobs',
-    href: '/jobs',
-    icon: Briefcase,
-    proof: 'Roles posted by people you studied with.',
-    cta: 'See open roles',
-  },
-  {
-    title: 'About',
-    href: '/about',
-    icon: Info,
-    proof: 'Why this record exists, and how it is kept.',
-    cta: 'Read the archive',
-  },
-]
+}
+
+function getPlates(user: User | null): HomePlate[] {
+  if (isAdmin(user)) {
+    return [
+      {
+        title: 'Admin',
+        href: '/admin',
+        icon: ShieldCheck,
+        proof: 'Verify government papers, assign roles, and revoke sessions.',
+        cta: 'Open control ledger',
+      },
+      {
+        title: 'Faculty',
+        href: '/faculty',
+        icon: Megaphone,
+        proof: 'Publish and manage class announcements.',
+        cta: 'Manage announcements',
+      },
+      {
+        title: 'Alumni',
+        href: '/alumni',
+        icon: Users,
+        proof: 'Names, degrees, and the years they left.',
+        cta: 'View directory',
+      },
+      {
+        title: 'Jobs',
+        href: '/jobs',
+        icon: Briefcase,
+        proof: 'Roles posted by people you studied with.',
+        cta: 'See open roles',
+      },
+    ]
+  }
+
+  if (isVerifiedMember(user)) {
+    const workspacePlate: HomePlate = hasAnyRole(user, [
+      'academic',
+      'professor',
+    ])
+      ? {
+          title: 'Faculty',
+          href: '/faculty',
+          icon: Megaphone,
+          proof: 'Publish and edit notices for students and alumni.',
+          cta: 'Open announcements',
+        }
+      : hasRole(user, 'alumni')
+        ? {
+            title: 'Graduate',
+            href: '/graduate',
+            icon: GraduationCap,
+            proof: 'Manage job postings you published and read class news.',
+            cta: 'Open graduate desk',
+          }
+        : {
+            title: 'Student',
+            href: '/student',
+            icon: UserCheck,
+            proof: 'Read announcements and active roles for your track.',
+            cta: 'Open student space',
+          }
+
+    return [
+      workspacePlate,
+      {
+        title: 'Alumni',
+        href: '/alumni',
+        icon: Users,
+        proof: 'Names, degrees, and the years they left.',
+        cta: 'View directory',
+      },
+      {
+        title: 'Jobs',
+        href: '/jobs',
+        icon: Briefcase,
+        proof: 'Roles posted by people you studied with.',
+        cta: 'See open roles',
+      },
+    ]
+  }
+
+  if (user) {
+    return [
+      {
+        title: 'Verification',
+        href: '/verification',
+        icon: ShieldCheck,
+        proof: 'Track government-paper verification for your requested role.',
+        cta: 'View status',
+      },
+      {
+        title: 'Account',
+        href: '/account',
+        icon: UserCheck,
+        proof: 'Update your personal profile details and password.',
+        cta: 'Open account',
+      },
+      {
+        title: 'About',
+        href: '/about',
+        icon: Info,
+        proof: 'Why this record exists, and how it is kept.',
+        cta: 'Read the archive',
+      },
+    ]
+  }
+
+  return [
+    {
+      title: 'Register',
+      href: '/register',
+      icon: UserPlus,
+      proof: 'Request access as an undergrad, graduate, alumnus, or faculty.',
+      cta: 'Create an account',
+    },
+    {
+      title: 'Sign in',
+      href: '/login',
+      icon: LogIn,
+      proof: 'Open your directory and job-board session.',
+      cta: 'Sign in now',
+    },
+    {
+      title: 'About',
+      href: '/about',
+      icon: Info,
+      proof: 'Why this record exists, and how it is kept.',
+      cta: 'Read the archive',
+    },
+  ]
+}
 
 function Node({ label, live = false }: { label: string; live?: boolean }) {
   return (
@@ -60,12 +184,25 @@ function Wire() {
 }
 
 export function Home() {
+  const { user, loading: authLoading } = useAuth()
   const [alumniCount, setAlumniCount] = useState('—')
   const [yearCount, setYearCount] = useState('—')
   const [jobCount, setJobCount] = useState('—')
   const [recordsUnavailable, setRecordsUnavailable] = useState(false)
 
+  const verifiedMember = isVerifiedMember(user)
+  const plates = getPlates(user)
+  const workspace = primaryWorkspaceFor(user)
+
   useEffect(() => {
+    if (!verifiedMember) {
+      setAlumniCount('—')
+      setYearCount('—')
+      setJobCount('—')
+      setRecordsUnavailable(false)
+      return
+    }
+
     let cancelled = false
     const format = new Intl.NumberFormat('en-US')
 
@@ -76,6 +213,7 @@ export function Home() {
         setAlumniCount(format.format(alumni.length))
         setYearCount(format.format(years.size))
         setJobCount(format.format(jobs.filter((job) => job.is_active).length))
+        setRecordsUnavailable(false)
       })
       .catch(() => {
         if (!cancelled) setRecordsUnavailable(true)
@@ -84,7 +222,7 @@ export function Home() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [verifiedMember])
 
   return (
     <div>
@@ -114,18 +252,52 @@ export function Home() {
                 went, what they built, and who is hiring now.
               </p>
               <div className="mt-10 flex flex-wrap items-center gap-8">
-                <Button asChild size="lg">
-                  <Link to="/alumni">Browse alumni</Link>
-                </Button>
-                <Link
-                  to="/jobs"
-                  className="arrow-link type-ui text-ink hover:text-mulberry"
-                >
-                  <span>Browse jobs</span>
-                  <span className="arrow-ring">
-                    <ArrowUpRight size={20} strokeWidth={1.5} aria-hidden="true" />
-                  </span>
-                </Link>
+                {verifiedMember ? (
+                  <>
+                    <Button asChild size="lg">
+                      <Link to={workspace.to}>{workspace.label}</Link>
+                    </Button>
+                    <Link
+                      to="/alumni"
+                      className="arrow-link type-ui text-ink hover:text-mulberry"
+                    >
+                      <span>Browse alumni</span>
+                      <span className="arrow-ring">
+                        <ArrowUpRight size={20} strokeWidth={1.5} aria-hidden="true" />
+                      </span>
+                    </Link>
+                  </>
+                ) : user ? (
+                  <>
+                    <Button asChild size="lg">
+                      <Link to="/verification">Verification status</Link>
+                    </Button>
+                    <Link
+                      to="/account"
+                      className="arrow-link type-ui text-ink hover:text-mulberry"
+                    >
+                      <span>Account settings</span>
+                      <span className="arrow-ring">
+                        <ArrowUpRight size={20} strokeWidth={1.5} aria-hidden="true" />
+                      </span>
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <Button asChild size="lg">
+                      <Link to="/register">Register</Link>
+                    </Button>
+                    <Link
+                      to="/login"
+                      className="arrow-link type-ui text-ink hover:text-mulberry"
+                    >
+                      <span>Sign in</span>
+                      <span className="arrow-ring">
+                        <ArrowUpRight size={20} strokeWidth={1.5} aria-hidden="true" />
+                      </span>
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -162,9 +334,13 @@ export function Home() {
             <p className="type-label text-ink-muted">
               SOURCE / REGISTRAR · 2026-11-18
             </p>
-            {recordsUnavailable && (
+            {recordsUnavailable ? (
               <p className="type-ui text-ink-muted">Records unavailable.</p>
-            )}
+            ) : !authLoading && !verifiedMember ? (
+              <p className="type-ui text-ink-muted">
+                Verified member sign-in required for live counts.
+              </p>
+            ) : null}
           </div>
         </div>
       </section>
@@ -174,11 +350,25 @@ export function Home() {
         <div className="mx-auto w-full max-w-[1280px] px-6 md:px-12">
           <div className="mb-10 flex flex-wrap items-end justify-between gap-4 border-t border-line pt-10">
             <h2 id="explore-heading" className="type-h2 text-ink">
-              Three ways in.
+              {plates.length === 4
+                ? 'Four ways in.'
+                : plates.length === 2
+                  ? 'Where to next.'
+                  : 'Three ways in.'}
             </h2>
-            <p className="type-label text-ink-muted">INDEX / 01—03</p>
+            <p className="type-label text-ink-muted">
+              INDEX / 01—0{plates.length}
+            </p>
           </div>
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+          <div
+            className={`grid grid-cols-1 gap-8 ${
+              plates.length === 4
+                ? 'md:grid-cols-2 lg:grid-cols-4'
+                : plates.length === 2
+                  ? 'md:grid-cols-2'
+                  : 'md:grid-cols-3'
+            }`}
+          >
             {plates.map((plate) => (
               <Link
                 key={plate.title}

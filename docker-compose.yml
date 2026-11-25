@@ -37,6 +37,10 @@ services:
       BIND_ADDR: ${BIND_ADDR:-0.0.0.0:8080}
       RUST_LOG: ${RUST_LOG:-info}
       ERROR_LOG: ${ERROR_LOG:-/app/logs/error.log}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
+      REQUIRE_SMS_VERIFICATION: ${REQUIRE_SMS_VERIFICATION:-false}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
     volumes:
       - api-logs:/app/logs
     ports:

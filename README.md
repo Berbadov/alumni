@@ -87,22 +87,26 @@ Docker Compose starts all layers. It is the shared wiring and is not part of one
 
 | Layer | Part | File or container |
 | --- | --- | --- |
-| Model | Data shapes `Alumni`, `CreateAlumni`, `UpdateAlumni`, `Announcement`, `CreateAnnouncement`, `UpdateAnnouncement`, `JobPosting`, `CreateJobPosting`, `UpdateJobPosting` | `services/alumni-api/src/models.rs` |
-| Model | MongoDB stores with `create`, `get`, `list`, `replace`, `update`, `delete` | `services/alumni-api/src/alumni_store.rs`, `services/alumni-api/src/announcement_store.rs`, `services/alumni-api/src/job_posting_store.rs` |
-| Model | Atomic id counters (`alumni`, `announcements`, `job_postings`) | `counters` collection, used inside the stores |
+| Model | Data shapes `User`, `RegisterUser`, `LoginRequest`, `AuthSession`, `UpdateOwnProfileRequest`, `VerifyUserRequest`, `AdminUpdateUserRequest`, `Role`, `VerificationStatus`, `Alumni`, `CreateAlumni`, `UpdateAlumni`, `Announcement`, `CreateAnnouncement`, `UpdateAnnouncement`, `JobPosting`, `CreateJobPosting`, `UpdateJobPosting` | `services/alumni-api/src/models.rs` |
+| Model | MongoDB stores for `users`, `sessions`, `alumni`, `announcements`, and `job_postings` | `services/alumni-api/src/user_store.rs`, `services/alumni-api/src/session_store.rs`, `services/alumni-api/src/alumni_store.rs`, `services/alumni-api/src/announcement_store.rs`, `services/alumni-api/src/job_posting_store.rs` |
+| Model | Atomic id counters (`users`, `alumni`, `announcements`, `job_postings`) | `counters` collection, used inside the stores |
+| Model | Data rules and inactive email/SMS verification policy | `services/alumni-api/src/models.rs`, `services/alumni-api/src/verification.rs` |
 | Model | Data rules: name, email, year, degree, title, body, and job posting checks plus the `ModelError` type | `services/alumni-api/src/models.rs` |
 | Model | Database settings and bind address | `services/alumni-api/src/config.rs` |
 | Model | Sample data and import | `seed/alumni.json`, `mongo-seed` container |
 | Model | Database | `mongo` container |
 | Controller | Route functions for health, hello and sum | `services/alumni-api/src/handlers.rs` |
+| Controller | `ApiAuthController`: functions for register, login, logout, current user, and own-profile updates | `services/alumni-api/src/controllers/api_auth_controller.rs` |
+| Controller | `ApiAdminController`: functions for user listing, paper verification, roles, and session revocation | `services/alumni-api/src/controllers/api_admin_controller.rs` |
 | Controller | `ApiAlumniController`: functions for the alumni JSON CRUD | `services/alumni-api/src/controllers/api_alumni_controller.rs` |
 | Controller | `AnnouncementController`: functions for the announcement pages (list, create, show, edit, update, delete) | `services/alumni-api/src/controllers/announcement_controller.rs` |
 | Controller | `ApiAnnouncementController`: functions for the announcement JSON CRUD | `services/alumni-api/src/controllers/api_announcement_controller.rs` |
 | Controller | `ApiJobPostingController`: functions for the job posting JSON CRUD | `services/alumni-api/src/controllers/api_job_posting_controller.rs` |
-| Controller | Route tables: `api_alumni.rs` (JSON), `announcement.rs` (pages), `api_announcement.rs` (JSON), and `api_job_posting.rs` (JSON) | `services/alumni-api/src/routes/` |
+| Controller | Route tables: `api_admin.rs` (JSON), `api_auth.rs` (JSON), `api_alumni.rs` (JSON), `announcement.rs` (pages), `api_announcement.rs` (JSON), and `api_job_posting.rs` (JSON) | `services/alumni-api/src/routes/` |
 | Controller | Error type and HTTP status mapping `ApiError` | `services/alumni-api/src/error.rs` |
 | Middleware | Request logger (terminal line plus error log file) and the 404 guardian | `services/alumni-api/src/middleware.rs` |
 | View | Generic HTML 404 page for unmatched non-API routes | `services/alumni-api/src/views/error.rs` |
+| Controller | Request logger, 404 guardian, and auth middleware | `services/alumni-api/src/middleware.rs`, `services/alumni-api/src/auth_middleware.rs` |
 | Controller | Stores, `/api/v1` scope, indexes, OpenAPI and Swagger UI | `services/alumni-api/src/main.rs` |
 | View | HTML pages for announcements (maud templates) | `services/alumni-api/src/views/` |
 | View | JSON responses that the API returns | Serde derive on the Model structs |
@@ -151,15 +155,31 @@ Then open these addresses:
 
 The first `up` command fills MongoDB with sample alumni. The `mongo-seed` container does this.
 
+Copy `.env.example` to `.env` before you start Compose if you want an initial admin account or custom settings:
+
+- `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`: create or promote an initial `admin` user at API startup.
+- `REQUIRE_EMAIL_VERIFICATION` and `REQUIRE_SMS_VERIFICATION`: keep `false` until email and SMS providers are wired.
+
 ## Routes
 
-The SPA has these pages: `/` (home), `/alumni` (list), `/jobs` (job postings), and `/about`
-(placeholder with a Prufrock poem). For an unknown path, the SPA redirects to `/404`
+The SPA has these pages: `/` (home), `/alumni` (list), `/jobs` (job postings),
+`/about` (project and poem), `/register` (account registration), `/login`
+(sign in and sign out), `/account` (personal profile and password),
+`/verification` (unverified paper status), `/student` (student workspace),
+`/graduate` (alumni workspace), `/faculty` (announcements console), and `/admin`
+(admin panel for paper verification and roles). Navigation items and route
+access adapt to the user's role: guests see `Home`, `About`, `Register`, and
+`Sign in`; `unverified` users see `Home`, `Verification`, `Account`, and
+`About`; verified students unlock `Student`, `Alumni`, `Jobs`, and `Account`;
+verified alumni unlock `Graduate`, `Alumni`, `Jobs`, and `Account`; academic and
+professor roles unlock `Faculty`, `Alumni`, `Jobs`, and `Account`; and `admin`
+unlocks `Faculty` and `Admin`. For an unknown path, the SPA redirects to `/404`
 and shows the 404 page.
 
 The `/jobs` page lists job postings with All, Active, and Inactive filters. It creates postings
 with `POST`, edits them with `PUT`, activates or deactivates them with `PATCH`, and deletes them
-with `DELETE`. The author picker reads `/api/v1/alumni`. The list reloads after each write.
+with `DELETE`. Non-admin authors publish under their own account id; admins can select an account
+or an alumni record from `/api/v1/alumni`. The list reloads after each write.
 
 The API has these routes under `/api/v1`. Use port 8080 for the API or port 80 for the gateway.
 
@@ -188,7 +208,7 @@ See `docs/trade-offs.md`.
 
 `ApiAnnouncementController` serves the announcement JSON routes under
 `/api/v1/announcements`. The same routes also work under `/api/announcements`.
-Each announcement links to an alumni record through `author_id`. An unknown
+Each announcement links to a user or alumni record through `author_id`. An unknown
 `author_id` fails with status 400.
 
 | Route | Returns |
@@ -201,7 +221,7 @@ Each announcement links to an alumni record through `author_id`. An unknown
 | `DELETE /api/v1/announcements/{id}` | Status 204, or status 404 |
 
 `ApiJobPostingController` serves the job posting JSON routes under
-`/api/v1/job-postings`. Each posting links to an alumni record through
+`/api/v1/job-postings`. Each posting links to a user or alumni record through
 `author_id`. An unknown `author_id` fails with status 400. `is_active`
 defaults to `true`; use `GET /api/v1/job-postings?active=true` to hide
 inactive rows. Delete of an alumni record with job postings fails with
@@ -232,9 +252,31 @@ does not exist, the page shows an HTML 404 page.
 | `POST /announcements/{id}` | Replaces `title`, `body` and `author_id` of one announcement |
 | `POST /announcements/{id}/delete` | Deletes one announcement |
 
-The Swagger UI shows all routes, grouped by the tags `ApiAlumniController`,
-`AnnouncementController`, `ApiAnnouncementController`, and
-`ApiJobPostingController`:
+`ApiAuthController` serves registration and sessions under `/api/v1/auth`.
+New accounts start with the `unverified` role until government papers are
+verified.
+
+| Route | Returns |
+| --- | --- |
+| `POST /api/v1/auth/register` | The new `unverified` user record (status 201), 400 on invalid input or duplicate email, or 403 for `admin` |
+| `POST /api/v1/auth/login` | `AuthSession` JSON and `alumni_session` HttpOnly cookie (status 200), or 401 on wrong credentials |
+| `POST /api/v1/auth/logout` | Revokes the session and clears `alumni_session` (status 204) |
+| `GET /api/v1/auth/me` | Current `User` for the active session (status 200), or 401 when absent or expired |
+| `PATCH /api/v1/auth/me` | Updates own profile fields or password after checking `current_password` (status 200) |
+
+`ApiAdminController` serves administrator endpoints under `/api/v1/admin`.
+Every route requires an active session with the `admin` role.
+
+| Route | Returns |
+| --- | --- |
+| `GET /api/v1/admin/users` | All user accounts, ordered by id |
+| `POST /api/v1/admin/users/{id}/verify` | Approves or rejects government-paper verification and revokes active sessions |
+| `PATCH /api/v1/admin/users/{id}` | Updates `roles` or `is_active` and revokes active sessions |
+| `POST /api/v1/admin/users/{id}/revoke-sessions` | Revokes all active sessions for one user (status 204) |
+
+The Swagger UI shows all routes, grouped by the tags `ApiAuthController`,
+`ApiAdminController`, `ApiAlumniController`, `AnnouncementController`,
+`ApiAnnouncementController`, and `ApiJobPostingController`:
 http://localhost:8080/api/swagger. The gateway also serves it at
 http://localhost/api/swagger. The gateway proxies `/announcements` to the API.
 

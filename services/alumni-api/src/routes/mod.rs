@@ -1,12 +1,16 @@
 pub mod announcement;
+pub mod api_admin;
 pub mod api_alumni;
 pub mod api_announcement;
+pub mod api_auth;
 pub mod api_job_posting;
 
 use actix_web::web;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.configure(api_alumni::configure)
+    cfg.configure(api_admin::configure)
+        .configure(api_alumni::configure)
+        .configure(api_auth::configure)
         .configure(announcement::configure)
         .configure(api_announcement::configure)
         .configure(api_job_posting::configure);
@@ -29,8 +33,13 @@ mod tests {
     use super::configure;
     use crate::alumni_store::AlumniStore;
     use crate::announcement_store::AnnouncementStore;
+    use crate::auth_middleware::AuthMiddleware;
     use crate::job_posting_store::JobPostingStore;
-    use crate::models::{Alumni, Announcement, JobPosting};
+    use crate::models::{
+        Alumni, Announcement, AuthSession, JobPosting, Role, User, VerificationStatus,
+    };
+    use crate::session_store::SessionStore;
+    use crate::user_store::UserStore;
     use crate::AppState;
 
     static TEST_DB_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -69,11 +78,43 @@ mod tests {
             .create_index(IndexModel::builder().keys(doc! { "is_active": 1 }).build())
             .await
             .unwrap();
+        db.collection::<Document>("users")
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "email": 1 })
+                    .options(IndexOptions::builder().unique(true).build())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        db.collection::<Document>("users")
+            .create_index(IndexModel::builder().keys(doc! { "roles": 1 }).build())
+            .await
+            .unwrap();
+        db.collection::<Document>("sessions")
+            .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
+            .await
+            .unwrap();
+        db.collection::<Document>("sessions")
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "expires_at": 1 })
+                    .options(
+                        IndexOptions::builder()
+                            .expire_after(std::time::Duration::from_secs(0))
+                            .build(),
+                    )
+                    .build(),
+            )
+            .await
+            .unwrap();
         (
             AppState {
                 alumni: AlumniStore::new(&db),
                 announcements: AnnouncementStore::new(&db),
                 job_postings: JobPostingStore::new(&db),
+                users: UserStore::new(&db),
+                sessions: SessionStore::new(&db),
             },
             name,
         )
@@ -83,16 +124,75 @@ mod tests {
         test_client().await.database(name).drop().await.unwrap();
     }
 
+    async fn session_for(
+        db_name: &str,
+        email: &str,
+        role: Role,
+    ) -> (u64, actix_web::cookie::Cookie<'static>) {
+        use mongodb::bson::DateTime;
+        use mongodb::options::ReturnDocument;
+
+        let db = test_client().await.database(db_name);
+        let updated = db
+            .collection::<Document>("counters")
+            .find_one_and_update(
+                doc! { "_id": "users" },
+                doc! { "$inc": { "seq": 1_i64 } },
+            )
+            .upsert(true)
+            .return_document(ReturnDocument::After)
+            .await
+            .unwrap()
+            .unwrap();
+        let raw_id = updated.get_i64("seq").unwrap();
+        let user_id = u64::try_from(raw_id).unwrap();
+        let now = DateTime::now();
+        let status = if role == Role::Unverified {
+            "pending"
+        } else {
+            "verified"
+        };
+        db.collection::<Document>("users")
+            .insert_one(doc! {
+                "_id": raw_id,
+                "first_name": "Test",
+                "last_name": "User",
+                "full_name": "Test User",
+                "age": 30_i32,
+                "email": email,
+                "roles": [role.as_str()],
+                "verification_status": status,
+                "email_verified": false,
+                "phone_verified": false,
+                "is_active": true,
+                "created_at": now,
+                "updated_at": now,
+            })
+            .await
+            .unwrap();
+        let (token, _) = SessionStore::new(&db).create(user_id).await.unwrap();
+        (user_id, actix_web::cookie::Cookie::new("alumni_session", token))
+    }
+
     macro_rules! test_app {
         () => {{
             let (state, db_name) = test_state().await;
             let app = test::init_service(
                 App::new()
                     .app_data(web::Data::new(state))
+                    .wrap(AuthMiddleware)
                     .configure(configure),
             )
             .await;
             (app, db_name)
+        }};
+    }
+
+    macro_rules! admin_app {
+        () => {{
+            let (app, db_name) = test_app!();
+            let (_, admin) = session_for(&db_name, "admin@test.edu", Role::Admin).await;
+            (app, db_name, admin)
         }};
     }
 
@@ -106,9 +206,10 @@ mod tests {
     }
 
     macro_rules! seed_alumni {
-        ($app:expr) => {
+        ($app:expr, $cookie:expr) => {
             let req = TestRequest::post()
                 .uri("/api/v1/alumni")
+                .cookie($cookie.clone())
                 .set_json(alumni_json("Ada Lovelace", "ada@example.com"))
                 .to_request();
             assert_eq!(
@@ -119,10 +220,11 @@ mod tests {
     }
 
     macro_rules! seed_announcement {
-        ($app:expr) => {
-            seed_alumni!($app);
+        ($app:expr, $cookie:expr) => {
+            seed_alumni!($app, $cookie);
             let req = TestRequest::post()
                 .uri("/api/v1/announcements")
+                .cookie($cookie.clone())
                 .set_json(json!({ "title": "Reunion", "body": "Save the date", "author_id": 1 }))
                 .to_request();
             assert_eq!(
@@ -145,10 +247,11 @@ mod tests {
     }
 
     macro_rules! seed_job_posting {
-        ($app:expr) => {
-            seed_alumni!($app);
+        ($app:expr, $cookie:expr) => {
+            seed_alumni!($app, $cookie);
             let req = TestRequest::post()
                 .uri("/api/v1/job-postings")
+                .cookie($cookie.clone())
                 .set_json(job_posting_json("Rust Engineer"))
                 .to_request();
             assert_eq!(
@@ -160,10 +263,11 @@ mod tests {
 
     #[actix_web::test]
     async fn alumni_create_get_patch_put_delete_lifecycle() {
-        let (app, db) = test_app!();
+        let (app, db, admin) = admin_app!();
 
         let req = TestRequest::post()
             .uri("/api/v1/alumni")
+            .cookie(admin.clone())
             .set_json(alumni_json("  Ada Lovelace  ", "Ada@Example.com"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -175,12 +279,16 @@ mod tests {
         assert_eq!(created.graduation_year, 2027);
 
         let uri = "/api/v1/alumni/1";
-        let alumni: Alumni =
-            test::call_and_read_body_json(&app, TestRequest::get().uri(uri).to_request()).await;
+        let alumni: Alumni = test::call_and_read_body_json(
+            &app,
+            TestRequest::get().uri(uri).cookie(admin.clone()).to_request(),
+        )
+        .await;
         assert_eq!(alumni.full_name, "Ada Lovelace");
 
         let req = TestRequest::patch()
             .uri(uri)
+            .cookie(admin.clone())
             .set_json(json!({ "full_name": "Ada King" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -191,6 +299,7 @@ mod tests {
 
         let req = TestRequest::put()
             .uri(uri)
+            .cookie(admin.clone())
             .set_json(alumni_json("Ada", "ada@math.org"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -199,11 +308,21 @@ mod tests {
         assert_eq!(replaced.full_name, "Ada");
         assert_eq!(replaced.email, "ada@math.org");
 
-        let resp =
-            test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete()
+                .uri(uri)
+                .cookie(admin.clone())
+                .to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-        let resp = test::call_service(&app, TestRequest::get().uri(uri).to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::get().uri(uri).cookie(admin).to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         cleanup(&db).await;
@@ -211,11 +330,12 @@ mod tests {
 
     #[actix_web::test]
     async fn alumni_list_returns_all_in_id_order() {
-        let (app, db) = test_app!();
+        let (app, db, admin) = admin_app!();
 
         for (name, email) in [("first", "first@example.com"), ("second", "second@example.com")] {
             let req = TestRequest::post()
                 .uri("/api/v1/alumni")
+                .cookie(admin.clone())
                 .set_json(alumni_json(name, email))
                 .to_request();
             let resp = test::call_service(&app, req).await;
@@ -224,7 +344,10 @@ mod tests {
 
         let alumni: Vec<Alumni> = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri("/api/v1/alumni").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/alumni")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(alumni.len(), 2);
@@ -236,7 +359,7 @@ mod tests {
 
     #[actix_web::test]
     async fn alumni_rejects_invalid_input() {
-        let (app, db) = test_app!();
+        let (app, db, admin) = admin_app!();
 
         for body in [
             alumni_json("", "a@example.com"),
@@ -257,6 +380,7 @@ mod tests {
         ] {
             let req = TestRequest::post()
                 .uri("/api/v1/alumni")
+                .cookie(admin.clone())
                 .set_json(&body)
                 .to_request();
             let resp = test::call_service(&app, req).await;
@@ -265,6 +389,7 @@ mod tests {
 
         let req = TestRequest::patch()
             .uri("/api/v1/alumni/999")
+            .cookie(admin)
             .set_json(json!({ "full_name": "Ghost" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -275,11 +400,12 @@ mod tests {
 
     #[actix_web::test]
     async fn alumni_rejects_duplicate_email() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         let req = TestRequest::post()
             .uri("/api/v1/alumni")
+            .cookie(admin)
             .set_json(alumni_json("Ada Clone", "ADA@example.com"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -290,12 +416,15 @@ mod tests {
 
     #[actix_web::test]
     async fn alumni_delete_with_announcements_fails_until_they_go() {
-        let (app, db) = test_app!();
-        seed_announcement!(app);
+        let (app, db, admin) = admin_app!();
+        seed_announcement!(app, admin);
 
         let resp = test::call_service(
             &app,
-            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+            TestRequest::delete()
+                .uri("/api/v1/alumni/1")
+                .cookie(admin.clone())
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -304,6 +433,7 @@ mod tests {
             &app,
             TestRequest::delete()
                 .uri("/api/v1/announcements/1")
+                .cookie(admin.clone())
                 .to_request(),
         )
         .await;
@@ -311,7 +441,10 @@ mod tests {
 
         let resp = test::call_service(
             &app,
-            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+            TestRequest::delete()
+                .uri("/api/v1/alumni/1")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
@@ -321,11 +454,12 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_create_get_patch_put_delete_lifecycle() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         let req = TestRequest::post()
             .uri("/api/v1/announcements")
+            .cookie(admin.clone())
             .set_json(json!({ "title": "  Reunion  ", "body": "  Save the date  ", "author_id": 1 }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -339,13 +473,14 @@ mod tests {
         let uri = "/api/v1/announcements/1";
         let announcement: Announcement = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri(uri).to_request(),
+            TestRequest::get().uri(uri).cookie(admin.clone()).to_request(),
         )
         .await;
         assert_eq!(announcement.title, "Reunion");
 
         let req = TestRequest::patch()
             .uri(uri)
+            .cookie(admin.clone())
             .set_json(json!({ "title": "Picnic" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -356,6 +491,7 @@ mod tests {
 
         let req = TestRequest::put()
             .uri(uri)
+            .cookie(admin.clone())
             .set_json(json!({ "title": "Fair", "body": "New body", "author_id": 1 }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -364,10 +500,21 @@ mod tests {
         assert_eq!(replaced.title, "Fair");
         assert_eq!(replaced.author_id, 1);
 
-        let resp = test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete()
+                .uri(uri)
+                .cookie(admin.clone())
+                .to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-        let resp = test::call_service(&app, TestRequest::get().uri(uri).to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::get().uri(uri).cookie(admin).to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         cleanup(&db).await;
@@ -375,12 +522,13 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_list_returns_all_in_id_order() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         for title in ["first", "second"] {
             let req = TestRequest::post()
                 .uri("/api/v1/announcements")
+                .cookie(admin.clone())
                 .set_json(json!({ "title": title, "body": "body", "author_id": 1 }))
                 .to_request();
             let resp = test::call_service(&app, req).await;
@@ -389,7 +537,10 @@ mod tests {
 
         let announcements: Vec<Announcement> = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri("/api/v1/announcements").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/announcements")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(announcements.len(), 2);
@@ -401,8 +552,8 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_rejects_invalid_input() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         for body in [
             json!({ "title": "", "body": "body", "author_id": 1 }),
@@ -411,6 +562,7 @@ mod tests {
         ] {
             let req = TestRequest::post()
                 .uri("/api/v1/announcements")
+                .cookie(admin.clone())
                 .set_json(&body)
                 .to_request();
             let resp = test::call_service(&app, req).await;
@@ -419,6 +571,7 @@ mod tests {
 
         let req = TestRequest::patch()
             .uri("/api/v1/announcements/999")
+            .cookie(admin)
             .set_json(json!({ "title": "Ghost" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -429,11 +582,12 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_alias_serves_the_same_store() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         let req = TestRequest::post()
             .uri("/api/announcements")
+            .cookie(admin.clone())
             .set_json(json!({ "title": "Alias", "body": "body", "author_id": 1 }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -443,6 +597,7 @@ mod tests {
             &app,
             TestRequest::get()
                 .uri("/api/v1/announcements")
+                .cookie(admin)
                 .to_request(),
         )
         .await;
@@ -453,11 +608,12 @@ mod tests {
 
     #[actix_web::test]
     async fn job_posting_create_get_patch_put_delete_lifecycle() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         let req = TestRequest::post()
             .uri("/api/v1/job-postings")
+            .cookie(admin.clone())
             .set_json(json!({
                 "title": "  Rust Engineer  ",
                 "company": "  Acme  ",
@@ -484,13 +640,14 @@ mod tests {
         let uri = "/api/v1/job-postings/1";
         let posting: JobPosting = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri(uri).to_request(),
+            TestRequest::get().uri(uri).cookie(admin.clone()).to_request(),
         )
         .await;
         assert_eq!(posting.title, "Rust Engineer");
 
         let req = TestRequest::patch()
             .uri(uri)
+            .cookie(admin.clone())
             .set_json(json!({ "title": "Backend Engineer", "is_active": false }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -502,6 +659,7 @@ mod tests {
 
         let req = TestRequest::put()
             .uri(uri)
+            .cookie(admin.clone())
             .set_json(job_posting_json("Platform Engineer"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -510,10 +668,21 @@ mod tests {
         assert_eq!(replaced.title, "Platform Engineer");
         assert!(replaced.is_active);
 
-        let resp = test::call_service(&app, TestRequest::delete().uri(uri).to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::delete()
+                .uri(uri)
+                .cookie(admin.clone())
+                .to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-        let resp = test::call_service(&app, TestRequest::get().uri(uri).to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::get().uri(uri).cookie(admin).to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         cleanup(&db).await;
@@ -521,14 +690,15 @@ mod tests {
 
     #[actix_web::test]
     async fn job_posting_list_returns_id_order_and_filters_active() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         for (title, active) in [("Active", true), ("Inactive", false)] {
             let mut body = job_posting_json(title);
             body["is_active"] = json!(active);
             let req = TestRequest::post()
                 .uri("/api/v1/job-postings")
+                .cookie(admin.clone())
                 .set_json(body)
                 .to_request();
             let resp = test::call_service(&app, req).await;
@@ -537,7 +707,10 @@ mod tests {
 
         let all: Vec<JobPosting> = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri("/api/v1/job-postings").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/job-postings")
+                .cookie(admin.clone())
+                .to_request(),
         )
         .await;
         assert_eq!(all.len(), 2);
@@ -548,6 +721,7 @@ mod tests {
             &app,
             TestRequest::get()
                 .uri("/api/v1/job-postings?active=true")
+                .cookie(admin.clone())
                 .to_request(),
         )
         .await;
@@ -558,6 +732,7 @@ mod tests {
             &app,
             TestRequest::get()
                 .uri("/api/v1/job-postings?active=false")
+                .cookie(admin)
                 .to_request(),
         )
         .await;
@@ -569,8 +744,8 @@ mod tests {
 
     #[actix_web::test]
     async fn job_posting_rejects_invalid_input() {
-        let (app, db) = test_app!();
-        seed_job_posting!(app);
+        let (app, db, admin) = admin_app!();
+        seed_job_posting!(app, admin);
 
         for (field, value) in [
             ("title", json!("")),
@@ -585,6 +760,7 @@ mod tests {
             body[field] = value;
             let req = TestRequest::post()
                 .uri("/api/v1/job-postings")
+                .cookie(admin.clone())
                 .set_json(&body)
                 .to_request();
             let resp = test::call_service(&app, req).await;
@@ -593,6 +769,7 @@ mod tests {
 
         let req = TestRequest::patch()
             .uri("/api/v1/job-postings/1")
+            .cookie(admin.clone())
             .set_json(json!({ "apply_url": "example.com" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -600,6 +777,7 @@ mod tests {
 
         let req = TestRequest::patch()
             .uri("/api/v1/job-postings/1")
+            .cookie(admin.clone())
             .set_json(json!({ "title": "x".repeat(121) }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -607,6 +785,7 @@ mod tests {
 
         let req = TestRequest::patch()
             .uri("/api/v1/job-postings/1")
+            .cookie(admin.clone())
             .set_json(json!({ "author_id": 999 }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -614,6 +793,7 @@ mod tests {
 
         let req = TestRequest::patch()
             .uri("/api/v1/job-postings/999")
+            .cookie(admin)
             .set_json(json!({ "title": "Ghost" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -624,11 +804,12 @@ mod tests {
 
     #[actix_web::test]
     async fn job_posting_description_and_location_are_optional() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
 
         let req = TestRequest::post()
             .uri("/api/v1/job-postings")
+            .cookie(admin.clone())
             .set_json(json!({
                 "title": "Minimal posting",
                 "company": "Acme",
@@ -648,6 +829,7 @@ mod tests {
         body["location"] = json!("  ");
         let req = TestRequest::post()
             .uri("/api/v1/job-postings")
+            .cookie(admin)
             .set_json(body)
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -661,12 +843,15 @@ mod tests {
 
     #[actix_web::test]
     async fn alumni_delete_with_job_postings_fails_until_they_go() {
-        let (app, db) = test_app!();
-        seed_job_posting!(app);
+        let (app, db, admin) = admin_app!();
+        seed_job_posting!(app, admin);
 
         let resp = test::call_service(
             &app,
-            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+            TestRequest::delete()
+                .uri("/api/v1/alumni/1")
+                .cookie(admin.clone())
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -675,6 +860,7 @@ mod tests {
             &app,
             TestRequest::delete()
                 .uri("/api/v1/job-postings/1")
+                .cookie(admin.clone())
                 .to_request(),
         )
         .await;
@@ -682,7 +868,10 @@ mod tests {
 
         let resp = test::call_service(
             &app,
-            TestRequest::delete().uri("/api/v1/alumni/1").to_request(),
+            TestRequest::delete()
+                .uri("/api/v1/alumni/1")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
@@ -690,16 +879,17 @@ mod tests {
         cleanup(&db).await;
     }
 
-    async fn body_text(resp: ServiceResponse) -> String {
+    async fn body_text<B: actix_web::body::MessageBody>(resp: ServiceResponse<B>) -> String {
         String::from_utf8(test::read_body(resp).await.to_vec()).unwrap()
     }
 
     #[actix_web::test]
     async fn announcements_page_lists_and_escapes_html() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
         let req = TestRequest::post()
             .uri("/api/v1/announcements")
+            .cookie(admin.clone())
             .set_json(json!({ "title": "<b>Reunion</b>", "body": "Save the date", "author_id": 1 }))
             .to_request();
         assert_eq!(
@@ -707,8 +897,14 @@ mod tests {
             StatusCode::CREATED
         );
 
-        let resp =
-            test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri("/announcements")
+                .cookie(admin)
+                .to_request(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK);
         let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
         assert!(content_type.starts_with("text/html"));
@@ -728,18 +924,21 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_form_post_creates_and_redirects() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
-        let req =
-            announcement_form_post("/announcements", "title=Reunion&body=Save+the+date&author_id=1")
-                .to_request();
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
+        let req = announcement_form_post("/announcements", "title=Reunion&body=Save+the+date&author_id=1")
+            .cookie(admin.clone())
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
         assert_eq!(resp.headers().get(LOCATION).unwrap(), "/announcements");
 
         let announcement: Announcement = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/announcements/1")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(announcement.title, "Reunion");
@@ -750,12 +949,13 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_form_post_with_invalid_input_shows_the_error() {
-        let (app, db) = test_app!();
-        seed_alumni!(app);
+        let (app, db, admin) = admin_app!();
+        seed_alumni!(app, admin);
         let req = announcement_form_post(
             "/announcements",
             "title=&body=Save+the+date&author_id=1",
         )
+        .cookie(admin)
         .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -768,11 +968,12 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_form_post_with_unknown_author_shows_the_error() {
-        let (app, db) = test_app!();
+        let (app, db, admin) = admin_app!();
         let req = announcement_form_post(
             "/announcements",
             "title=Reunion&body=Save+the+date&author_id=999",
         )
+        .cookie(admin)
         .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -784,11 +985,17 @@ mod tests {
 
     #[actix_web::test]
     async fn announcements_index_page_links_each_row_to_show_edit_and_delete() {
-        let (app, db) = test_app!();
-        seed_announcement!(app);
+        let (app, db, admin) = admin_app!();
+        seed_announcement!(app, admin);
 
-        let resp =
-            test::call_service(&app, TestRequest::get().uri("/announcements").to_request()).await;
+        let resp = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri("/announcements")
+                .cookie(admin)
+                .to_request(),
+        )
+        .await;
         let body = body_text(resp).await;
         assert!(body.contains(r#"href="/announcements/1""#));
         assert!(body.contains(r#"href="/announcements/1/edit""#));
@@ -799,12 +1006,15 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_show_and_edit_pages_render_the_announcement() {
-        let (app, db) = test_app!();
-        seed_announcement!(app);
+        let (app, db, admin) = admin_app!();
+        seed_announcement!(app, admin);
 
         let resp = test::call_service(
             &app,
-            TestRequest::get().uri("/announcements/1").to_request(),
+            TestRequest::get()
+                .uri("/announcements/1")
+                .cookie(admin.clone())
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
@@ -814,7 +1024,10 @@ mod tests {
 
         let resp = test::call_service(
             &app,
-            TestRequest::get().uri("/announcements/1/edit").to_request(),
+            TestRequest::get()
+                .uri("/announcements/1/edit")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
@@ -827,8 +1040,8 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_form_post_updates_and_redirects() {
-        let (app, db) = test_app!();
-        seed_announcement!(app);
+        let (app, db, admin) = admin_app!();
+        seed_announcement!(app, admin);
 
         let resp = test::call_service(
             &app,
@@ -836,6 +1049,7 @@ mod tests {
                 "/announcements/1",
                 "title=Picnic&body=Bring+food&author_id=1",
             )
+            .cookie(admin.clone())
             .to_request(),
         )
         .await;
@@ -844,7 +1058,10 @@ mod tests {
 
         let announcement: Announcement = test::call_and_read_body_json(
             &app,
-            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/announcements/1")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(announcement.title, "Picnic");
@@ -855,12 +1072,13 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_form_post_update_with_invalid_input_shows_the_edit_page_with_error() {
-        let (app, db) = test_app!();
-        seed_announcement!(app);
+        let (app, db, admin) = admin_app!();
+        seed_announcement!(app, admin);
 
         let resp = test::call_service(
             &app,
             announcement_form_post("/announcements/1", "title=&body=Bring+food&author_id=1")
+                .cookie(admin)
                 .to_request(),
         )
         .await;
@@ -874,12 +1092,14 @@ mod tests {
 
     #[actix_web::test]
     async fn announcement_form_post_deletes_and_redirects() {
-        let (app, db) = test_app!();
-        seed_announcement!(app);
+        let (app, db, admin) = admin_app!();
+        seed_announcement!(app, admin);
 
         let resp = test::call_service(
             &app,
-            announcement_form_post("/announcements/1/delete", "").to_request(),
+            announcement_form_post("/announcements/1/delete", "")
+                .cookie(admin.clone())
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::SEE_OTHER);
@@ -887,7 +1107,10 @@ mod tests {
 
         let resp = test::call_service(
             &app,
-            TestRequest::get().uri("/api/v1/announcements/1").to_request(),
+            TestRequest::get()
+                .uri("/api/v1/announcements/1")
+                .cookie(admin)
+                .to_request(),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -897,15 +1120,23 @@ mod tests {
 
     #[actix_web::test]
     async fn missing_announcement_renders_an_html_404_page() {
-        let (app, db) = test_app!();
+        let (app, db, admin) = admin_app!();
 
         let requests = [
-            TestRequest::get().uri("/announcements/99").to_request(),
+            TestRequest::get()
+                .uri("/announcements/99")
+                .cookie(admin.clone())
+                .to_request(),
             TestRequest::get()
                 .uri("/announcements/99/edit")
+                .cookie(admin.clone())
                 .to_request(),
-            announcement_form_post("/announcements/99", "title=T&body=B&author_id=1").to_request(),
-            announcement_form_post("/announcements/99/delete", "").to_request(),
+            announcement_form_post("/announcements/99", "title=T&body=B&author_id=1")
+                .cookie(admin.clone())
+                .to_request(),
+            announcement_form_post("/announcements/99/delete", "")
+                .cookie(admin)
+                .to_request(),
         ];
         for req in requests {
             let resp = test::call_service(&app, req).await;
@@ -913,6 +1144,362 @@ mod tests {
             let content_type = resp.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
             assert!(content_type.starts_with("text/html"));
         }
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn auth_register_creates_user_and_hides_password() {
+        let (app, db) = test_app!();
+
+        let req = TestRequest::post()
+            .uri("/api/v1/auth/register")
+            .set_json(json!({
+                "first_name": "  Ada ",
+                "last_name": " Lovelace ",
+                "age": 24,
+                "email": "Ada@Example.com",
+                "academic_status": "grad",
+                "password": "password123",
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let raw = body_text(resp).await;
+        assert!(!raw.contains("password_hash"));
+        let created: User = serde_json::from_str(&raw).unwrap();
+        assert_eq!(created.id, 1);
+        assert_eq!(created.first_name, "Ada");
+        assert_eq!(created.last_name, "Lovelace");
+        assert_eq!(created.full_name, "Ada Lovelace");
+        assert_eq!(created.age, 24);
+        assert_eq!(created.email, "ada@example.com");
+        assert_eq!(created.roles, vec![Role::Unverified]);
+        assert_eq!(created.requested_role, Some(Role::Grad));
+        assert_eq!(created.verification_status, VerificationStatus::Pending);
+        assert!(!created.email_verified);
+        assert!(!created.phone_verified);
+        assert!(created.is_active);
+
+        let dup = TestRequest::post()
+            .uri("/api/v1/auth/register")
+            .set_json(json!({
+                "first_name": "Ada",
+                "last_name": "Clone",
+                "age": 25,
+                "email": "ada@example.com",
+                "graduation_date": "2024-06-15",
+                "password": "password123",
+            }))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, dup).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let admin = TestRequest::post()
+            .uri("/api/v1/auth/register")
+            .set_json(json!({
+                "first_name": "Root",
+                "last_name": "User",
+                "age": 30,
+                "email": "root@example.com",
+                "academic_status": "admin",
+                "password": "password123",
+            }))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, admin).await.status(),
+            StatusCode::FORBIDDEN
+        );
+
+        let unauth_me =
+            test::call_service(&app, TestRequest::get().uri("/api/v1/auth/me").to_request()).await;
+        assert_eq!(unauth_me.status(), StatusCode::UNAUTHORIZED);
+
+        let bad_login = TestRequest::post()
+            .uri("/api/v1/auth/login")
+            .set_json(json!({ "email": "ada@example.com", "password": "wrong-password" }))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, bad_login).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let login_req = TestRequest::post()
+            .uri("/api/v1/auth/login")
+            .set_json(json!({ "email": "ada@example.com", "password": "password123" }))
+            .to_request();
+        let login_resp = test::call_service(&app, login_req).await;
+        assert_eq!(login_resp.status(), StatusCode::OK);
+        let session_cookie = login_resp
+            .response()
+            .cookies()
+            .find(|c| c.name() == "alumni_session")
+            .expect("session cookie")
+            .into_owned();
+        let auth_session: AuthSession = test::read_body_json(login_resp).await;
+        assert_eq!(auth_session.user.email, "ada@example.com");
+
+        let me_resp = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/auth/me")
+                .cookie(session_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(me_resp.status(), StatusCode::OK);
+        let me: User = test::read_body_json(me_resp).await;
+        assert_eq!(me.id, created.id);
+
+        let logout_resp = test::call_service(
+            &app,
+            TestRequest::post()
+                .uri("/api/v1/auth/logout")
+                .cookie(session_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(logout_resp.status(), StatusCode::NO_CONTENT);
+
+        let revoked_me = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/auth/me")
+                .cookie(session_cookie)
+                .to_request(),
+        )
+        .await;
+        assert_eq!(revoked_me.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn auth_middleware_enforces_401_and_403_across_roles() {
+        let (app, db) = test_app!();
+
+        assert_eq!(
+            test::call_service(&app, TestRequest::get().uri("/api/v1/alumni").to_request())
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let (_, unverified) = session_for(&db, "new@example.com", Role::Unverified).await;
+        assert_eq!(
+            test::call_service(
+                &app,
+                TestRequest::get()
+                    .uri("/api/v1/alumni")
+                    .cookie(unverified)
+                    .to_request(),
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+
+        let (alumni_id, alumnus) = session_for(&db, "alum@example.com", Role::Alumni).await;
+        assert_eq!(
+            test::call_service(
+                &app,
+                TestRequest::get()
+                    .uri("/api/v1/alumni")
+                    .cookie(alumnus.clone())
+                    .to_request(),
+            )
+            .await
+            .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            test::call_service(
+                &app,
+                TestRequest::post()
+                    .uri("/api/v1/announcements")
+                    .cookie(alumnus.clone())
+                    .set_json(json!({ "title": "Nope", "body": "Denied", "author_id": alumni_id }))
+                    .to_request(),
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+
+        let post_req = TestRequest::post()
+            .uri("/api/v1/job-postings")
+            .cookie(alumnus)
+            .set_json(json!({
+                "title": "Rust Role",
+                "company": "Acme",
+                "employment_type": "Full-time",
+                "apply_url": "https://example.com/apply",
+                "author_id": alumni_id,
+            }))
+            .to_request();
+        assert_eq!(
+            test::call_service(&app, post_req).await.status(),
+            StatusCode::CREATED
+        );
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn admin_endpoints_require_admin_and_verify_or_update_users() {
+        let (app, db) = test_app!();
+        let (target_id, target_cookie) = session_for(&db, "student@example.com", Role::Unverified).await;
+        let (_, alumni_cookie) = session_for(&db, "alum@example.com", Role::Alumni).await;
+        let (admin_id, admin_cookie) = session_for(&db, "admin@example.com", Role::Admin).await;
+
+        assert_eq!(
+            test::call_service(
+                &app,
+                TestRequest::get()
+                    .uri("/api/v1/admin/users")
+                    .cookie(alumni_cookie)
+                    .to_request(),
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+
+        let users: Vec<User> = test::call_and_read_body_json(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/admin/users")
+                .cookie(admin_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(users.len(), 3);
+
+        let verify_resp = test::call_service(
+            &app,
+            TestRequest::post()
+                .uri(&format!("/api/v1/admin/users/{target_id}/verify"))
+                .cookie(admin_cookie.clone())
+                .set_json(json!({
+                    "verification_status": "verified",
+                    "roles": ["grad"],
+                    "verification_method": "government_papers",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(verify_resp.status(), StatusCode::OK);
+        let verified: User = test::read_body_json(verify_resp).await;
+        assert_eq!(verified.roles, vec![Role::Grad]);
+        assert_eq!(verified.verification_status, VerificationStatus::Verified);
+
+        let revoked_target = test::call_service(
+            &app,
+            TestRequest::get()
+                .uri("/api/v1/auth/me")
+                .cookie(target_cookie)
+                .to_request(),
+        )
+        .await;
+        assert_eq!(revoked_target.status(), StatusCode::UNAUTHORIZED);
+
+        let self_disable = test::call_service(
+            &app,
+            TestRequest::patch()
+                .uri(&format!("/api/v1/admin/users/{admin_id}"))
+                .cookie(admin_cookie)
+                .set_json(json!({ "is_active": false }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(self_disable.status(), StatusCode::BAD_REQUEST);
+
+        cleanup(&db).await;
+    }
+
+    #[actix_web::test]
+    async fn auth_update_me_updates_profile_and_password() {
+        let (app, db) = test_app!();
+        let reg = test::call_service(
+            &app,
+            TestRequest::post()
+                .uri("/api/v1/auth/register")
+                .set_json(json!({
+                    "first_name": "Grace",
+                    "last_name": "Hopper",
+                    "age": 35,
+                    "email": "grace@example.edu",
+                    "academic_status": "phd",
+                    "password": "initial-pass",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(reg.status(), StatusCode::CREATED);
+
+        let login = test::call_service(
+            &app,
+            TestRequest::post()
+                .uri("/api/v1/auth/login")
+                .set_json(json!({
+                    "email": "grace@example.edu",
+                    "password": "initial-pass",
+                }))
+                .to_request(),
+        )
+        .await;
+        let cookie = login
+            .response()
+            .cookies()
+            .find(|c| c.name() == "alumni_session")
+            .expect("session cookie")
+            .into_owned();
+
+        let wrong_pw = test::call_service(
+            &app,
+            TestRequest::patch()
+                .uri("/api/v1/auth/me")
+                .cookie(cookie.clone())
+                .set_json(json!({
+                    "current_password": "wrong-pass",
+                    "new_password": "updated-pass",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(wrong_pw.status(), StatusCode::UNAUTHORIZED);
+
+        let updated: User = test::call_and_read_body_json(
+            &app,
+            TestRequest::patch()
+                .uri("/api/v1/auth/me")
+                .cookie(cookie)
+                .set_json(json!({
+                    "first_name": "Rear Adm. Grace",
+                    "phone_number": "+905551234567",
+                    "current_password": "initial-pass",
+                    "new_password": "updated-pass",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(updated.full_name, "Rear Adm. Grace Hopper");
+        assert_eq!(updated.phone_number.as_deref(), Some("+905551234567"));
+
+        let relogin = test::call_service(
+            &app,
+            TestRequest::post()
+                .uri("/api/v1/auth/login")
+                .set_json(json!({
+                    "email": "grace@example.edu",
+                    "password": "updated-pass",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(relogin.status(), StatusCode::OK);
 
         cleanup(&db).await;
     }

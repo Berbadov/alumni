@@ -1,11 +1,8 @@
-import { Link, NavLink, Outlet } from 'react-router-dom'
-
-const NAV = [
-  { to: '/', label: 'Home', end: true },
-  { to: '/alumni', label: 'Alumni', end: false },
-  { to: '/jobs', label: 'Jobs', end: false },
-  { to: '/about', label: 'About', end: false },
-]
+import { useState } from 'react'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useAuth } from '@/auth'
+import { Button } from '@/components/ui/button'
+import { getNavItems, isVerifiedMember } from '@/navigation'
 
 function navLinkClass({ isActive }: { isActive: boolean }) {
   return [
@@ -28,6 +25,22 @@ function Mark() {
 }
 
 export function Layout() {
+  const { user, loading, logout } = useAuth()
+  const [signingOut, setSigningOut] = useState(false)
+  const navigate = useNavigate()
+  const navItems = getNavItems(user, loading)
+  const verifiedMember = isVerifiedMember(user)
+
+  async function handleLogout() {
+    setSigningOut(true)
+    try {
+      await logout()
+      navigate('/login')
+    } finally {
+      setSigningOut(false)
+    }
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-white">
       <a
@@ -46,10 +59,13 @@ export function Layout() {
             </span>
           </Link>
 
-          <nav aria-label="Primary" className="flex items-center gap-3 sm:gap-7">
-            {NAV.map((item) => (
+          <nav
+            aria-label="Primary"
+            className="flex flex-wrap items-center gap-3 sm:gap-7"
+          >
+            {navItems.map((item) => (
               <NavLink
-                key={item.to}
+                key={`${item.to}:${item.label}`}
                 to={item.to}
                 end={item.end}
                 className={navLinkClass}
@@ -59,9 +75,48 @@ export function Layout() {
             ))}
           </nav>
 
-          <div className="hidden items-center gap-2 lg:flex">
-            <span className="status-dot text-ink-muted" aria-hidden="true" />
-            <span className="type-label text-ink-muted">Directory 2026</span>
+          <div className="flex items-center gap-3">
+            {user ? (
+              <>
+                <Link
+                  to="/account"
+                  className="hidden items-center gap-2 lg:flex"
+                  title="Account ledger"
+                >
+                  {verifiedMember && user.verification_status === 'verified' ? (
+                    <span className="live-dot" aria-hidden="true" />
+                  ) : (
+                    <span
+                      className="status-dot text-ink-muted"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span className="type-ui text-ink">{user.first_name}</span>
+                  <span className="type-label text-ink-muted">
+                    {user.roles.join(' · ')}
+                  </span>
+                </Link>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={signingOut}
+                  onClick={handleLogout}
+                >
+                  {signingOut ? 'Signing out…' : 'Sign out'}
+                </Button>
+              </>
+            ) : (
+              <div className="hidden items-center gap-2 lg:flex">
+                <span
+                  className="status-dot text-ink-muted"
+                  aria-hidden="true"
+                />
+                <span className="type-label text-ink-muted">
+                  Directory 2026
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </header>

@@ -5,6 +5,7 @@ import {
   fetchJobPostings,
   setJobPostingActive,
 } from '@/api'
+import { useAuth } from '@/auth'
 import { JobPostingForm } from '@/components/JobPostingForm'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { canModifyJobPosting, canPostJobs } from '@/navigation'
 import type { Alumni, JobPosting } from '@/types'
 
 type Filter = 'all' | 'active' | 'inactive'
@@ -31,6 +33,7 @@ function message(error: unknown): string {
 }
 
 export function Jobs() {
+  const { user } = useAuth()
   const [postings, setPostings] = useState<JobPosting[]>([])
   const [alumni, setAlumni] = useState<Alumni[]>([])
   const [alumniLoading, setAlumniLoading] = useState(true)
@@ -43,6 +46,8 @@ export function Jobs() {
   const [alumniError, setAlumniError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+
+  const allowCreate = canPostJobs(user)
 
   useEffect(() => {
     let cancelled = false
@@ -181,7 +186,9 @@ export function Jobs() {
             </div>
 
             <div className="flex flex-col items-start gap-4 md:col-span-5 md:items-end md:pt-2">
-              <Button onClick={openCreate}>New posting</Button>
+              {allowCreate ? (
+                <Button onClick={openCreate}>New posting</Button>
+              ) : null}
               <p className="type-label text-left text-ink-muted md:text-right">
                 OPEN / ACTIVE / INACTIVE
               </p>
@@ -255,14 +262,21 @@ export function Jobs() {
           <div className="rounded-plate border border-dotted border-line-strong px-6 py-16 text-center">
             <p className="type-label text-ink-muted">NO POSTINGS</p>
             <p className="type-ui mx-auto mt-4 max-w-[46ch] text-ink-muted">
-              No postings in this view;{' '}
-              <Button
-                variant="link"
-                className="h-auto p-0 align-baseline"
-                onClick={openCreate}
-              >
-                create the first one.
-              </Button>
+              No postings in this view
+              {allowCreate ? (
+                <>
+                  ;{' '}
+                  <Button
+                    variant="link"
+                    className="h-auto p-0 align-baseline"
+                    onClick={openCreate}
+                  >
+                    create the first one.
+                  </Button>
+                </>
+              ) : (
+                '.'
+              )}
             </p>
           </div>
         ) : (
@@ -306,8 +320,10 @@ export function Jobs() {
                       {posting.employment_type || 'Not recorded.'}
                     </TableCell>
                     <TableCell className="type-data text-ink">
-                      {authorNames.get(posting.author_id) ??
-                        `Alumni #${posting.author_id}`}
+                      {posting.author_id === user?._id
+                        ? user.full_name
+                        : authorNames.get(posting.author_id) ??
+                          `Member #${posting.author_id}`}
                     </TableCell>
                     <TableCell>
                       <span className="type-ui inline-flex items-center gap-2 lowercase text-ink">
@@ -333,30 +349,34 @@ export function Jobs() {
                             Apply
                           </a>
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEdit(posting)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busyId === posting._id}
-                          onClick={() => handleToggle(posting)}
-                        >
-                          {posting.is_active ? 'Deactivate' : 'Activate'}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="border-destructive text-destructive hover:border-destructive hover:bg-destructive hover:text-white"
-                          disabled={busyId === posting._id}
-                          onClick={() => handleDelete(posting)}
-                        >
-                          Delete
-                        </Button>
+                        {canModifyJobPosting(user, posting.author_id) ? (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEdit(posting)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busyId === posting._id}
+                              onClick={() => handleToggle(posting)}
+                            >
+                              {posting.is_active ? 'Deactivate' : 'Activate'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-destructive text-destructive hover:border-destructive hover:bg-destructive hover:text-white"
+                              disabled={busyId === posting._id}
+                              onClick={() => handleDelete(posting)}
+                            >
+                              Delete
+                            </Button>
+                          </>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>

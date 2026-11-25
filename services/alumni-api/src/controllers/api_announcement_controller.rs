@@ -4,6 +4,7 @@
 use actix_web::{HttpResponse, web};
 
 use crate::AppState;
+use crate::auth_middleware::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::models::{Announcement, CreateAnnouncement, UpdateAnnouncement};
 
@@ -16,12 +17,17 @@ use crate::models::{Announcement, CreateAnnouncement, UpdateAnnouncement};
     responses(
         (status = 201, description = "Announcement created", body = Announcement),
         (status = 400, description = "Empty title or body, or unknown author"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Insufficient permissions"),
     ),
 )]
 pub async fn create(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     body: web::Json<CreateAnnouncement>,
 ) -> Result<HttpResponse, ApiError> {
+    actor.can_create_announcement()?;
+    actor.can_act_as_author(body.author_id)?;
     let announcement = state.announcements.create(&body).await?;
     Ok(HttpResponse::Created().json(announcement))
 }
@@ -31,9 +37,17 @@ pub async fn create(
     get,
     path = "/api/v1/announcements",
     tag = "ApiAnnouncementController",
-    responses((status = 200, description = "All announcements", body = [Announcement])),
+    responses(
+        (status = 200, description = "All announcements", body = [Announcement]),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Account verification pending"),
+    ),
 )]
-pub async fn list(state: web::Data<AppState>) -> Result<web::Json<Vec<Announcement>>, ApiError> {
+pub async fn list(
+    state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
+) -> Result<web::Json<Vec<Announcement>>, ApiError> {
+    actor.can_read_directory()?;
     Ok(web::Json(state.announcements.list().await?))
 }
 
@@ -45,13 +59,17 @@ pub async fn list(state: web::Data<AppState>) -> Result<web::Json<Vec<Announceme
     params(("id" = u64, Path, description = "Announcement id")),
     responses(
         (status = 200, description = "The announcement", body = Announcement),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Account verification pending"),
         (status = 404, description = "No announcement with that id"),
     ),
 )]
 pub async fn get(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
 ) -> Result<web::Json<Announcement>, ApiError> {
+    actor.can_read_directory()?;
     Ok(web::Json(state.announcements.get(path.into_inner()).await?))
 }
 
@@ -65,20 +83,22 @@ pub async fn get(
     responses(
         (status = 200, description = "Announcement replaced", body = Announcement),
         (status = 400, description = "Empty title or body, or unknown author"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "No announcement with that id"),
     ),
 )]
 pub async fn replace(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
     body: web::Json<CreateAnnouncement>,
 ) -> Result<web::Json<Announcement>, ApiError> {
-    Ok(web::Json(
-        state
-            .announcements
-            .replace(path.into_inner(), &body)
-            .await?,
-    ))
+    let id = path.into_inner();
+    let existing = state.announcements.get(id).await?;
+    actor.can_modify_announcement(existing.author_id)?;
+    actor.can_act_as_author(body.author_id)?;
+    Ok(web::Json(state.announcements.replace(id, &body).await?))
 }
 
 /// Applies a partial update to an announcement (only provided fields change).
@@ -91,19 +111,25 @@ pub async fn replace(
     responses(
         (status = 200, description = "Announcement updated", body = Announcement),
         (status = 400, description = "Empty title or body, or unknown author"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "No announcement with that id"),
     ),
 )]
 pub async fn update(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
     body: web::Json<UpdateAnnouncement>,
 ) -> Result<web::Json<Announcement>, ApiError> {
+    let id = path.into_inner();
+    let existing = state.announcements.get(id).await?;
+    actor.can_modify_announcement(existing.author_id)?;
+    if let Some(author_id) = body.author_id {
+        actor.can_act_as_author(author_id)?;
+    }
     Ok(web::Json(
-        state
-            .announcements
-            .update(path.into_inner(), body.into_inner())
-            .await?,
+        state.announcements.update(id, body.into_inner()).await?,
     ))
 }
 
@@ -115,13 +141,19 @@ pub async fn update(
     params(("id" = u64, Path, description = "Announcement id")),
     responses(
         (status = 204, description = "Announcement deleted"),
+        (status = 401, description = "Authentication required"),
+        (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "No announcement with that id"),
     ),
 )]
 pub async fn delete(
     state: web::Data<AppState>,
+    AuthenticatedUser(actor): AuthenticatedUser,
     path: web::Path<u64>,
 ) -> Result<HttpResponse, ApiError> {
-    state.announcements.delete(path.into_inner()).await?;
+    let id = path.into_inner();
+    let existing = state.announcements.get(id).await?;
+    actor.can_modify_announcement(existing.author_id)?;
+    state.announcements.delete(id).await?;
     Ok(HttpResponse::NoContent().finish())
 }

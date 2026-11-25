@@ -2,6 +2,84 @@
 
 Completed work log, newest first.
 
+## 2026-11-25 — User-specific pages and own-profile editing
+- `alumni-api`: added `UpdateOwnProfileRequest` (`models.rs`),
+  `UserStore::update_own_profile` (`user_store.rs`), and `PATCH /api/v1/auth/me`
+  (`ApiAuthController::update_me` in `controllers/api_auth_controller.rs`,
+  `routes/api_auth.rs`, OpenAPI registration in `main.rs`, and integration test
+  `auth_update_me_updates_profile_and_password` in `routes/mod.rs`) so signed-in
+  users can update their own name, phone number, graduation date, and password.
+- `frontend`: created five user-specific pages following `BRAND.md`:
+  - `/account` (`src/pages/Account.tsx`) — personal identity/verification ledger,
+    profile editor, password change form, and sign-out across all signed-in roles.
+  - `/verification` (`src/pages/Verification.tsx`) — pending/rejected paper
+    verification checklist and inactive email/SMS readiness for `unverified` users.
+  - `/student` (`src/pages/StudentPortal.tsx`) — track summary, announcements,
+    and active job offers for `undergrad`, `grad`, and `phd` users.
+  - `/graduate` (`src/pages/GraduateWorkspace.tsx`) — personal job-postings
+    desk (create/edit/toggle/delete authored offers) and directory match for
+    `alumni` users.
+  - `/faculty` (`src/pages/FacultyWorkspace.tsx`) — announcements console
+    (`GET/POST/PUT/DELETE /api/v1/announcements`) for `academic`, `professor`,
+    and `admin` users.
+- Updated `navigation.ts`, `RequireAccess.tsx`, `JobPostingForm.tsx`,
+  `Layout.tsx`, `Login.tsx`, `Home.tsx`, `Jobs.tsx`, and `App.tsx` so menus,
+  author attribution, and landing plates route every role to its workspace.
+
+## 2026-11-25 — Dynamic role-based navigation
+- `frontend/src/navigation.ts` + `src/components/RequireAccess.tsx`: added a
+  shared role-and-access configuration (`getNavItems`, `canAccess`,
+  `isVerifiedMember`, `isAdmin`, `canPostJobs`, `canModifyJobPosting`) and a
+  route guard plate for verified-only views.
+- `frontend/src/components/Layout.tsx` + `src/App.tsx` + `src/pages/Home.tsx` +
+  `src/pages/Jobs.tsx`: primary menu items, home quick-access plates/hero CTAs,
+  `/alumni` and `/jobs` route guards, and job authoring/edit buttons now adapt
+  to the signed-in user's role (`guest`, `unverified`, verified members,
+  job authors, and `admin`).
+
+## 2026-11-25 — Authorization design, `/register`, `/login`, logout, and `unverified` workflow
+- `docs/ddd.md`: added `users` and `sessions` collections, `Role` enum
+  (`unverified`, `undergrad`, `grad`, `phd`, `alumni`, `academic`, `professor`,
+  `admin`), `VerificationStatus` (`pending`, `verified`, `rejected`),
+  government-paper verification rules, inactive email/SMS flags,
+  role-and-ownership authorization matrix, indexes, `002_add_users_and_auth.js`
+  migration plan, and updated ER diagram.
+- `alumni-api`: added `ApiAdminController` (`GET /api/v1/admin/users`,
+  `POST /api/v1/admin/users/{id}/verify`, `PATCH /api/v1/admin/users/{id}`,
+  `POST /api/v1/admin/users/{id}/revoke-sessions`) and `routes/api_admin.rs`;
+  added `VerifyUserRequest`, `AdminUpdateUserRequest`, `normalize_assigned_roles`,
+  and `User::can_manage_users` in `models.rs`; added `UserStore::list`,
+  `UserStore::verify_user`, `UserStore::admin_update`, and optional
+  `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` startup bootstrap in
+  `config.rs` + `main.rs`; added `SessionStore::revoke_for_user`; added
+  `AuthMiddleware` + `AuthenticatedUser` extractor (`src/auth_middleware.rs`)
+  protecting `/api/v1/auth/me`, `/api/v1/admin/*`, `/api/v1/alumni*`,
+  `/api/v1/announcements*`, `/api/announcements*`, `/api/v1/job-postings*`,
+  and `/announcements*` (401 when unauthenticated, passing public and
+  unmatched 404 routes through); added `User` role and ownership policy checks
+  in `models.rs` and wired them into `ApiAlumniController`,
+  `ApiAnnouncementController`, `AnnouncementController`, and
+  `ApiJobPostingController`; added `Role`, `VerificationStatus`, `User`,
+  `RegisterUser`, `LoginRequest`, `AuthSession`, and validation helpers in
+  `models.rs`; `VerificationPolicy` (`src/verification.rs`) with
+  `REQUIRE_EMAIL_VERIFICATION` and `REQUIRE_SMS_VERIFICATION` defaulting to
+  `false` in `config.rs`; `UserStore` (`src/user_store.rs`) assigning
+  `roles: ["unverified"]` and `verification_status: "pending"` on registration
+  with salted PBKDF2-HMAC-SHA256 hashes; `SessionStore`
+  (`src/session_store.rs`) storing SHA-256 token digests with 7-day expiry and
+  TTL index; `ApiAuthController` (`POST /api/v1/auth/register`,
+  `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`)
+  and `routes/api_auth.rs`; `ModelError::Unauthenticated` (401) and
+  `ModelError::Forbidden` (403) in `error.rs`; startup indexes on `users.email`
+  (unique), `users.roles`, `sessions.user_id`, and `sessions.expires_at` (TTL).
+- `frontend`: new `/register` (`src/pages/Register.tsx`), `/login`
+  (`src/pages/Login.tsx`), and `/admin` (`src/pages/Admin.tsx`) pages,
+  `AuthProvider` (`src/auth.tsx`), header `Admin` link and Sign in / Sign out
+  state in `Layout.tsx`, routes in `App.tsx`, and auth/admin calls in
+  `src/api.ts` + `src/types.ts`.
+- Docs: updated `README.md`, `.env.example`, `docker-compose.yml`,
+  `docs/backlog.md`, `docs/trade-offs.md`, and `docs/architecture/container.mmd`.
+
 ## 2026-11-18 — Pistachio Dream shipped in the frontend
 - `frontend/src/index.css`: replaced the lime/navy shadcn tokens with the v1.1
   system — green and editorial families, derived neutrals, plate/slab/field/pill

@@ -11,6 +11,7 @@ use crate::models::{
 #[derive(Debug, Clone)]
 pub struct AnnouncementStore {
     alumni: Collection<Document>,
+    users: Collection<Document>,
     announcements: Collection<Document>,
     counters: Collection<Document>,
 }
@@ -19,6 +20,7 @@ impl AnnouncementStore {
     pub fn new(db: &Database) -> Self {
         Self {
             alumni: db.collection("alumni"),
+            users: db.collection("users"),
             announcements: db.collection("announcements"),
             counters: db.collection("counters"),
         }
@@ -39,12 +41,20 @@ impl AnnouncementStore {
 
     async fn author_exists(&self, author_id: u64) -> Result<bool, ModelError> {
         let key = i64::try_from(author_id).map_err(ModelError::internal)?;
-        let found = self
+        let user_found = self
+            .users
+            .find_one(doc! { "_id": key })
+            .await
+            .map_err(ModelError::internal)?;
+        if user_found.is_some() {
+            return Ok(true);
+        }
+        let alumni_found = self
             .alumni
             .find_one(doc! { "_id": key })
             .await
             .map_err(ModelError::internal)?;
-        Ok(found.is_some())
+        Ok(alumni_found.is_some())
     }
 
     async fn check_author(&self, author_id: u64) -> Result<i64, ModelError> {
